@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+@theme {
+  --color-spotify-green: #1ed760;
+  --color-near-black: #121212;
+  --color-dark-surface: #181818;
+  --color-mid-dark: #1f1f1f;
+  
+  --color-text-white: #ffffff;
+  --color-text-silver: #b3b3b3;
+  --color-text-near-white: #cbcbcb;
+  --color-text-light: #fdfdfd;
+  
+  --color-negative-red: #f3727f;
+  --color-warning-orange: #ffa42b;
+  --color-announcement-blue: #539df5;
+  
+  --color-dark-card: #252525;
+  --color-mid-card: #272727;
+  --color-border-gray: #4d4d4d;
+  --color-light-border: #7c7c7c;
+  --color-separator: #b3b3b3;
+  --color-light-surface: #eeeeee;
+  --color-spotify-green-border: #1db954;
+
+  --shadow-spotify-heavy: rgba(0,0,0,0.5) 0px 8px 24px;
+  --shadow-spotify-medium: rgba(0,0,0,0.3) 0px 8px 8px;
+  --shadow-spotify-inset: rgb(18,18,18) 0px 1px 0px, rgb(124,124,124) 0px 0px 0px 1px inset;
+
+  --font-spotify: 'CircularSp-Arab', 'CircularSp-Hebr', 'CircularSp-Cyrl', 'CircularSp-Grek', 'CircularSp-Deva', 'Helvetica Neue', helvetica, arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', Meiryo, 'MS Gothic', sans-serif;
+  --font-spotify-title: 'CircularSp-Arab', 'CircularSp-Hebr', 'CircularSp-Cyrl', 'CircularSp-Grek', 'CircularSp-Deva', 'Helvetica Neue', helvetica, arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', Meiryo, 'MS Gothic', sans-serif;
+}
+
+:root {
+  --bg-color: #121212;
+  --panel-bg: #18181b;
+  --border-color: #27272a;
+  --text-primary: #ffffff;
+  --text-secondary: #b3b3b3;
+  --accent: #1ed760;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-spotify);
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  overflow-x: hidden;
+}
+
+.font-display {
+  font-family: var(--font-spotify-title);
+}
+
+.font-mono {
+  font-family: var(--font-spotify);
+}
+
+/* Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* Lyric Styling */
+.lyric-mask {
+  mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
+}
+
+.lyric-line {
+  transition: all 0.3s ease;
+  color: var(--text-secondary);
+  position: relative;
+}
+
+.lyric-line.active {
+  color: var(--text-primary);
+  transform: scale(1.05);
+  transform-origin: center;
+}
+
+/* Custom Range Input */
+.custom-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-text-white);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.custom-range:hover::-webkit-slider-thumb {
+  background: var(--color-spotify-green);
+}
+
+.custom-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-text-white);
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border: none;
+}
+
+.custom-range:hover::-moz-range-thumb {
+  background: var(--color-spotify-green);
+}
