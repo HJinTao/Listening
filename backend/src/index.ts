@@ -303,6 +303,7 @@ interface User {
 }
 
 const users = new Map<string, User>();
+const roomPlaylists = new Map<number, any[]>();
 
 type SyncCommand = {
   authorityId: string;
@@ -320,6 +321,7 @@ type PlayerSnapshot = {
   isPlaying: boolean;
   position: number;
   songInfo?: any;
+  playMode?: string;
 };
 
 import jwt from 'jsonwebtoken';
@@ -364,17 +366,22 @@ io.on('connection', (socket) => {
 
     const user = { id: socket.id, username, roomId: numRoomId, isHost };
     users.set(socket.id, user);
+    
+    if (!roomPlaylists.has(numRoomId)) {
+      roomPlaylists.set(numRoomId, []);
+    }
 
     // Broadcast user joined
     io.to(String(numRoomId)).emit('chat-message', {
       sender: 'System',
-      message: `${username} joined the room.`,
+      message: `${username} 加入了房间`,
       isSystem: true,
     });
 
     // Send room info to everyone
     io.to(String(numRoomId)).emit('room-info', {
       users: Array.from(users.values()).filter(u => u.roomId === numRoomId),
+      playlist: roomPlaylists.get(numRoomId),
     });
   });
 
@@ -390,11 +397,84 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('sync-command', ({ roomId, command }: { roomId: number; command: SyncCommand }) => {
+  socket.on('add-song', ({ roomId, song }) => {
+    const numRoomId = Number(roomId);
+    const user = users.get(socket.id);
+    if (!user || user.roomId !== numRoomId) return;
+    
+    const pl = roomPlaylists.get(numRoomId) || [];
+    // 标记是谁点的歌
+    song.requesterId = user.id;
+    song.requesterName = user.username;
+    pl.push(song);
+    roomPlaylists.set(numRoomId, pl);
+    
+    io.to(String(numRoomId)).emit('room-playlist', pl);
+    io.to(String(numRoomId)).emit('chat-message', {
+      sender: 'System',
+      message: `${user.username} 点了歌曲: ${song.name}`,
+      isSystem: true,
+    });
+  });
+
+  socket.on('remove-song', ({ roomId, index }) => {
     const numRoomId = Number(roomId);
     const user = users.get(socket.id);
     if (!user || (!user.isHost && !user.canControl) || user.roomId !== numRoomId) return;
+    
+    const pl = roomPlaylists.get(numRoomId) || [];
+    if (index >= 0 && index < pl.length) {
+      pl.splice(index, 1);
+      roomPlaylists.set(numRoomId, pl);
+      io.to(String(numRoomId)).emit('room-playlist', pl);
+    }
+  });
+
+  socket.on('clear-playlist', ({ roomId }) => {
+    const numRoomId = Number(roomId);
+    const user = users.get(socket.id);
+    if (!user || (!user.isHost && !user.canControl) || user.roomId !== numRoomId) return;
+    
+    roomPlaylists.set(numRoomId, []);
+    io.to(String(numRoomId)).emit('room-playlist', []);
+  });
+
+  socket.on('sync-command', ({ roomId, command }: { roomId: number; command: SyncCommand }) => {
+    const numRoomId = Number(roomId);
+    const user = users.get(socket.id);
+    if (!user || user.roomId !== numRoomId) return;
     if (!command || typeof command.seq !== 'number' || typeof command.sentAt !== 'number' || typeof command.type !== 'string') return;
+
+    let hasPermission = user.isHost || user.canControl;
+    if (!hasPermission && command.type === 'SEEK' && command.payload?.trackId) {
+      const pl = roomPlaylists.get(numRoomId) || [];
+      const song = pl.find((s: any) => (s.songmid || s.hash || s.id) === command.payload.trackId);
+      if (song && song.requesterId === user.id) {
+        hasPermission = true;
+      }
+    }
+
+    if (!hasPermission) return;
+
+    if (command.type === 'SET_TRACK' && command.payload?.songInfo) {
+      io.to(String(numRoomId)).emit('chat-message', {
+        sender: 'System',
+        message: `${user.username} 切歌: ${command.payload.songInfo.name}`,
+        isSystem: true,
+      });
+    } else if (command.type === 'CHANGE_MODE') {
+      const modeNames: Record<string, string> = {
+        'list-loop': '列表循环',
+        'single-loop': '单曲循环',
+        'random': '随机播放'
+      };
+      const modeName = modeNames[command.payload?.mode] || command.payload?.mode;
+      io.to(String(numRoomId)).emit('chat-message', {
+        sender: 'System',
+        message: `${user.username} 将播放模式更改为: ${modeName}`,
+        isSystem: true,
+      });
+    }
 
     const forwarded: SyncCommand = { ...command, authorityId: socket.id };
     socket.to(String(numRoomId)).emit('sync-command', forwarded);
@@ -434,6 +514,12 @@ io.on('connection', (socket) => {
         targetUser.canControl = true;
         io.to(String(numRoomId)).emit('room-info', {
           users: Array.from(users.values()).filter(u => u.roomId === numRoomId),
+          playlist: roomPlaylists.get(numRoomId),
+        });
+        io.to(String(numRoomId)).emit('chat-message', {
+          sender: 'System',
+          message: `${user.username} 将房主转移给了 ${targetUser.username}`,
+          isSystem: true,
         });
       }
     }
@@ -448,6 +534,12 @@ io.on('connection', (socket) => {
         targetUser.canControl = true;
         io.to(String(numRoomId)).emit('room-info', {
           users: Array.from(users.values()).filter(u => u.roomId === numRoomId),
+          playlist: roomPlaylists.get(numRoomId),
+        });
+        io.to(String(numRoomId)).emit('chat-message', {
+          sender: 'System',
+          message: `${user.username} 赋予了 ${targetUser.username} 控制权`,
+          isSystem: true,
         });
       }
     }
@@ -462,6 +554,12 @@ io.on('connection', (socket) => {
         targetUser.canControl = false;
         io.to(String(numRoomId)).emit('room-info', {
           users: Array.from(users.values()).filter(u => u.roomId === numRoomId),
+          playlist: roomPlaylists.get(numRoomId),
+        });
+        io.to(String(numRoomId)).emit('chat-message', {
+          sender: 'System',
+          message: `${user.username} 撤销了 ${targetUser.username} 的控制权`,
+          isSystem: true,
         });
       }
     }
@@ -476,7 +574,7 @@ io.on('connection', (socket) => {
 
       io.to(String(roomId)).emit('chat-message', {
         sender: 'System',
-        message: `${username} left the room.`,
+        message: `${username} 离开了房间`,
         isSystem: true,
       });
 
@@ -487,7 +585,7 @@ io.on('connection', (socket) => {
         remainingUsers[0].isHost = true;
         io.to(String(roomId)).emit('chat-message', {
           sender: 'System',
-          message: `${remainingUsers[0].username} is now the host.`,
+          message: `${remainingUsers[0].username} 成为房主`,
           isSystem: true,
         });
       }

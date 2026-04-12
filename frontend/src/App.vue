@@ -39,6 +39,13 @@ if (rememberPassword.value) {
 const users = ref<any[]>([]);
 const isHost = ref(false);
 const hasControl = computed(() => isHost.value || !!(users.value.find(u => u.id === socket.value?.id)?.canControl));
+const canSeek = computed(() => {
+  if (isHost.value) return true;
+  if (currentSong.value && currentSong.value.requesterId && socket.value) {
+    return currentSong.value.requesterId === socket.value.id;
+  }
+  return false;
+});
 
 const chatMessages = ref<any[]>([]);
 const chatInput = ref('');
@@ -50,12 +57,15 @@ const searchKeyword = ref('');
 const searchSource = ref('kw');
 const searchResults = ref<any[]>([]);
 const isSearching = ref(false);
+const searchPage = ref(1);
+const searchHasMore = ref(true);
 
-const activeTab = ref('search');
+const activeTab = ref('room');
 const playlist = ref<any[]>([]);
+const roomPlaylist = ref<any[]>([]);
 
 const playMode = ref<'list-loop' | 'single-loop' | 'random'>('list-loop');
-const currentContext = ref<'search' | 'playlist'>('search');
+const currentContext = ref<'search' | 'playlist' | 'room'>('search');
 const volume = ref(1);
 const duration = ref(0);
 
@@ -296,6 +306,9 @@ const connectSocket = () => {
 
   socket.value.on('room-info', (data) => {
     users.value = data.users;
+    if (data.playlist) {
+      roomPlaylist.value = data.playlist;
+    }
     const me = users.value.find(u => u.id === socket.value?.id);
     if (me) isHost.value = me.isHost;
 
@@ -308,6 +321,9 @@ const connectSocket = () => {
       lastAppliedSeq.value = 0;
       socket.value?.emit('request-state', { roomId: Number(roomId.value) });
     }
+  });
+  socket.value.on('room-playlist', (data) => {
+    roomPlaylist.value = data;
   });
   socket.value.on('chat-message', (data) => {
     chatMessages.value.push(data);
@@ -351,6 +367,7 @@ type PlayerSnapshot = {
   position: number;
   songInfo?: any;
   trackId?: string;
+  playMode?: string;
 };
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
@@ -418,6 +435,7 @@ const buildSnapshot = (): PlayerSnapshot | null => {
     position,
     songInfo: currentSong.value ?? undefined,
     trackId: getTrackId(),
+    playMode: playMode.value,
   };
 };
 
@@ -426,6 +444,9 @@ const applySnapshot = (snapshot: PlayerSnapshot) => {
   if (hostUserId.value && snapshot.authorityId && snapshot.authorityId !== hostUserId.value) return;
 
   lastAppliedSeq.value = snapshot.seq;
+  if (snapshot.playMode) {
+    playMode.value = snapshot.playMode as any;
+  }
   const urlChanged = snapshot.url !== currentUrl.value;
   currentUrl.value = snapshot.url || '';
   if (snapshot.songInfo) {
@@ -453,7 +474,17 @@ const applySnapshot = (snapshot: PlayerSnapshot) => {
 const applySyncCommand = (command: SyncCommand) => {
   if (!command || typeof command.seq !== 'number') return;
   const senderUser = users.value.find(u => u.id === command.authorityId);
-  if (!senderUser || (!senderUser.isHost && !senderUser.canControl)) return;
+  if (!senderUser) return;
+  
+  let hasPermission = senderUser.isHost || senderUser.canControl;
+  if (!hasPermission && command.type === 'SEEK' && command.payload?.trackId) {
+    const song = roomPlaylist.value.find(s => (s.songmid || s.hash || s.id) === command.payload!.trackId);
+    if (song && song.requesterId === senderUser.id) {
+      hasPermission = true;
+    }
+  }
+  if (!hasPermission) return;
+
   if (command.seq <= lastAppliedSeq.value) return;
   lastAppliedSeq.value = command.seq;
 
@@ -493,6 +524,11 @@ const applySyncCommand = (command: SyncCommand) => {
     return;
   }
 
+  if (command.type === 'CHANGE_MODE') {
+    if (payload.mode) playMode.value = payload.mode;
+    return;
+  }
+
   if (!audioRef.value) return;
   const playing = command.type === 'PAUSE' ? false : Boolean(payload.isPlaying ?? !audioRef.value.paused);
   const position = Number(payload.position ?? audioRef.value.currentTime);
@@ -514,7 +550,8 @@ const applySyncCommand = (command: SyncCommand) => {
 };
 
 const sendSyncCommand = (type: string, payload?: any) => {
-  if (!socket.value || !hasControl.value || !roomId.value) return;
+  if (!socket.value || !roomId.value) return;
+  if (!hasControl.value && !(canSeek.value && type === 'SEEK')) return;
   lastAppliedSeq.value += 1;
   socket.value.emit('sync-command', {
     roomId: Number(roomId.value),
@@ -535,14 +572,27 @@ const sendChat = () => {
   }
 };
 
-const searchMusic = async () => {
+const searchMusic = async (loadMore: any = false) => {
+  const isLoadMore = typeof loadMore === 'boolean' ? loadMore : false;
   if (!searchKeyword.value.trim()) return;
+  if (!isLoadMore) {
+    searchPage.value = 1;
+    searchResults.value = [];
+    searchHasMore.value = true;
+  }
+  if (!searchHasMore.value) return;
+
   isSearching.value = true;
   try {
     const resp = await axios.get(`${backendUrl}/api/search`, {
-      params: { keyword: searchKeyword.value, source: searchSource.value }
+      params: { keyword: searchKeyword.value, source: searchSource.value, page: searchPage.value, limit: 20 }
     });
-    searchResults.value = resp.data.list;
+    if (resp.data.list && resp.data.list.length > 0) {
+      searchResults.value = isLoadMore ? [...searchResults.value, ...resp.data.list] : resp.data.list;
+      searchPage.value++;
+    } else {
+      searchHasMore.value = false;
+    }
   } catch (error) {
     console.error('Search failed:', error);
   } finally {
@@ -550,7 +600,29 @@ const searchMusic = async () => {
   }
 };
 
-const playSong = async (song: any, context?: 'search' | 'playlist') => {
+const handleSearchScroll = (e: Event) => {
+  const target = e.target as HTMLElement;
+  if (target.scrollHeight - target.scrollTop <= target.clientHeight + 50) {
+    if (!isSearching.value && searchHasMore.value) {
+      searchMusic(true);
+    }
+  }
+};
+
+const addToRoomPlaylist = (song: any) => {
+  if (socket.value) {
+    socket.value.emit('add-song', { roomId: Number(roomId.value), song });
+  }
+};
+
+const removeSong = (index: number) => {
+  if (!hasControl.value) return;
+  if (socket.value) {
+    socket.value.emit('remove-song', { roomId: Number(roomId.value), index });
+  }
+};
+
+const playSong = async (song: any, context?: 'search' | 'playlist' | 'room') => {
   if (!hasControl.value) {
     alert(t('app.notHost'));
     return; // Only host can play or change songs
@@ -623,12 +695,12 @@ const onPause = () => {
   sendSyncCommand('PAUSE', { position: audioRef.value.currentTime, isPlaying: false, trackId: getTrackId() });
 };
 const onSeeked = () => { 
-  if (!hasControl.value) return;
+  if (!canSeek.value) return;
   if (!audioRef.value) return;
   sendSyncCommand('SEEK', { position: audioRef.value.currentTime, isPlaying: !audioRef.value.paused, trackId: getTrackId() });
 };
 const onSeeking = () => {
-  if (!hasControl.value) return;
+  if (!canSeek.value) return;
 };
 const onRateChange = () => {
   if (!audioRef.value) return;
@@ -648,7 +720,7 @@ const onTimeUpdate = () => {
 
 const playNextSong = (manual = false) => {
   if (!hasControl.value) return;
-  const list = currentContext.value === 'search' ? searchResults.value : playlist.value;
+  const list = currentContext.value === 'search' ? searchResults.value : (currentContext.value === 'playlist' ? playlist.value : roomPlaylist.value);
   if (list.length === 0) return;
 
   if (playMode.value === 'single-loop' && !manual) {
@@ -673,7 +745,7 @@ const playNextSong = (manual = false) => {
 
 const playPrevSong = () => {
   if (!hasControl.value) return;
-  const list = currentContext.value === 'search' ? searchResults.value : playlist.value;
+  const list = currentContext.value === 'search' ? searchResults.value : (currentContext.value === 'playlist' ? playlist.value : roomPlaylist.value);
   if (list.length === 0) return;
 
   if (playMode.value === 'random') {
@@ -707,10 +779,12 @@ const togglePlayMode = () => {
   if (playMode.value === 'list-loop') playMode.value = 'single-loop';
   else if (playMode.value === 'single-loop') playMode.value = 'random';
   else playMode.value = 'list-loop';
+  
+  sendSyncCommand('CHANGE_MODE', { mode: playMode.value });
 };
 
 const seekTo = (e: Event) => {
-  if (!hasControl.value) return;
+  if (!canSeek.value) return;
   const val = Number((e.target as HTMLInputElement).value);
   if (audioRef.value) {
     audioRef.value.currentTime = val;
@@ -869,6 +943,9 @@ watch(isLoggedIn, (val) => {
           
           <!-- Tabs as navigation pills -->
           <div class="flex space-x-2 p-4 bg-[var(--color-near-black)]">
+            <button @click="activeTab = 'room'" :class="activeTab === 'room' ? 'bg-[var(--color-dark-surface)] text-[var(--color-text-white)]' : 'bg-transparent text-[var(--color-text-silver)] hover:text-[var(--color-text-white)]'" class="px-4 py-1.5 rounded-[9999px] text-sm font-semibold transition-colors">
+              {{ t('app.roomPlaylist') }}
+            </button>
             <button @click="activeTab = 'search'" :class="activeTab === 'search' ? 'bg-[var(--color-dark-surface)] text-[var(--color-text-white)]' : 'bg-transparent text-[var(--color-text-silver)] hover:text-[var(--color-text-white)]'" class="px-4 py-1.5 rounded-[9999px] text-sm font-semibold transition-colors">
               {{ t('app.search') }}
             </button>
@@ -895,19 +972,19 @@ watch(isLoggedIn, (val) => {
               </div>
             </div>
             
-            <div class="flex-grow overflow-y-auto px-4 pb-4 space-y-1 custom-scrollbar">
+            <div class="flex-grow overflow-y-auto px-4 pb-4 space-y-1 custom-scrollbar" @scroll="handleSearchScroll">
               <div v-if="!hasControl" class="mb-4 text-[var(--color-text-silver)] text-sm font-semibold text-center flex items-center justify-center space-x-2">
-                <span>{{ t('app.notHost') }}</span>
+                <span>(仅房主与控制者可控制播放状态)</span>
               </div>
 
               <template v-if="activeTab === 'search'">
-                <div v-if="isSearching" class="flex items-center justify-center py-10">
+                <div v-if="isSearching && searchPage === 1" class="flex items-center justify-center py-10">
                   <div class="w-8 h-8 border-4 border-[var(--color-spotify-green)] border-t-transparent rounded-full animate-spin"></div>
                 </div>
                 <div v-else-if="searchResults.length === 0" class="text-center py-10 text-sm text-[var(--color-text-silver)] font-semibold">
                   {{ t('app.noResults') }}
                 </div>
-                <div v-for="song in searchResults" :key="song.songmid" class="group flex items-center justify-between p-2 rounded-[6px] transition-all" :class="hasControl ? 'hover:bg-[var(--color-dark-surface)] cursor-pointer' : 'opacity-50 cursor-not-allowed'" @click="playSong(song, 'search')">
+                <div v-for="song in searchResults" :key="song.songmid" class="group flex items-center justify-between p-2 rounded-[6px] transition-all hover:bg-[var(--color-dark-surface)] cursor-pointer" @click="addToRoomPlaylist(song)">
                   <div class="flex items-center space-x-3 min-w-0">
                     <div class="w-10 h-10 bg-[var(--color-dark-surface)] rounded-[4px] flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--color-mid-dark)] transition-colors">
                       <svg class="w-5 h-5 text-[var(--color-text-silver)] group-hover:text-[var(--color-text-white)] transition-colors" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -922,13 +999,16 @@ watch(isLoggedIn, (val) => {
                     <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
                   </button>
                 </div>
+                <div v-if="isSearching && searchPage > 1" class="flex items-center justify-center py-4">
+                  <div class="w-5 h-5 border-2 border-[var(--color-spotify-green)] border-t-transparent rounded-full animate-spin"></div>
+                </div>
               </template>
 
               <template v-else-if="activeTab === 'playlist'">
                 <div v-if="playlist.length === 0" class="text-center py-10 text-sm text-[var(--color-text-silver)] font-semibold">
                   {{ t('app.emptyPlaylist') }}
                 </div>
-                <div v-for="song in playlist" :key="song.songmid" class="group flex items-center justify-between p-2 rounded-[6px] transition-all" :class="hasControl ? 'hover:bg-[var(--color-dark-surface)] cursor-pointer' : 'opacity-50 cursor-not-allowed'" @click="playSong(song, 'playlist')">
+                <div v-for="song in playlist" :key="song.songmid" class="group flex items-center justify-between p-2 rounded-[6px] transition-all hover:bg-[var(--color-dark-surface)] cursor-pointer" @click="addToRoomPlaylist(song)">
                   <div class="flex items-center space-x-3 min-w-0">
                     <div class="w-10 h-10 bg-[var(--color-dark-surface)] rounded-[4px] flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--color-mid-dark)] transition-colors">
                       <svg class="w-5 h-5 text-[var(--color-text-silver)] group-hover:text-[var(--color-text-white)] transition-colors" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -940,6 +1020,29 @@ watch(isLoggedIn, (val) => {
                   </div>
                   <button @click.stop="togglePlaylist(song)" class="text-[var(--color-spotify-green)] hover:text-[var(--color-text-white)] p-2 transition-colors focus:outline-none z-10 relative">
                     <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                  </button>
+                </div>
+              </template>
+
+              <template v-else-if="activeTab === 'room'">
+                <div v-if="roomPlaylist.length === 0" class="text-center py-10 text-sm text-[var(--color-text-silver)] font-semibold">
+                  {{ t('app.emptyRoomPlaylist') }}
+                </div>
+                <div v-for="(song, index) in roomPlaylist" :key="index" class="group flex items-center justify-between p-2 rounded-[6px] transition-all" :class="[hasControl ? 'hover:bg-[var(--color-dark-surface)] cursor-pointer' : 'opacity-50 cursor-not-allowed', (song.songmid || song.hash || song.id) === getTrackId() ? 'bg-[var(--color-dark-surface)]' : '']" @click="playSong(song, 'room')">
+                  <div class="flex items-center space-x-3 min-w-0">
+                    <div class="w-10 h-10 bg-[var(--color-dark-surface)] rounded-[4px] flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--color-mid-dark)] transition-colors relative">
+                      <svg v-if="(song.songmid || song.hash || song.id) !== getTrackId()" class="w-5 h-5 text-[var(--color-text-silver)] group-hover:text-[var(--color-text-white)] transition-colors" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                      <div v-else class="flex space-x-[2px] h-4 items-end w-4 justify-center">
+                        <div v-for="i in 3" :key="i" class="w-1 bg-[var(--color-spotify-green)] rounded-sm" :class="{'animate-pulse': isPlaying}" :style="{height: isPlaying ? `${Math.max(40, Math.random() * 100)}%` : '40%'}"></div>
+                      </div>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-base font-semibold truncate" :class="(song.songmid || song.hash || song.id) === getTrackId() ? 'text-[var(--color-spotify-green)]' : 'text-[var(--color-text-white)]'">{{ song.name }}</div>
+                      <div class="text-sm text-[var(--color-text-silver)] truncate">{{ song.singer }} <span v-if="song.requesterName" class="ml-2 text-xs opacity-70">({{ song.requesterName }}点)</span></div>
+                    </div>
+                  </div>
+                  <button @click.stop="removeSong(index)" v-if="hasControl" class="text-[var(--color-text-silver)] hover:text-red-500 p-2 transition-colors focus:outline-none z-10 relative opacity-0 group-hover:opacity-100">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
                   </button>
                 </div>
               </template>
@@ -1034,7 +1137,7 @@ watch(isLoggedIn, (val) => {
               <!-- Progress Bar -->
               <div class="w-full flex items-center space-x-3 text-xs text-[var(--color-text-silver)] font-mono">
                 <span class="w-10 text-right">{{ formatTime(currentTime) }}</span>
-                <input type="range" :min="0" :max="duration || 100" :value="currentTime" @input="seekTo" :disabled="!hasControl" class="flex-grow h-1 bg-[var(--color-dark-surface)] rounded-full appearance-none cursor-pointer accent-[var(--color-text-white)] hover:accent-[var(--color-spotify-green)] custom-range">
+                <input type="range" :min="0" :max="duration || 100" :value="currentTime" @input="seekTo" :disabled="!canSeek" class="flex-grow h-1 bg-[var(--color-dark-surface)] rounded-full appearance-none cursor-pointer accent-[var(--color-text-white)] hover:accent-[var(--color-spotify-green)] custom-range">
                 <span class="w-10">{{ formatTime(duration) }}</span>
               </div>
             </div>
@@ -1076,8 +1179,8 @@ watch(isLoggedIn, (val) => {
           </div>
           
           <!-- Chat / Log -->
-          <div class="flex-grow flex flex-col bg-[var(--color-dark-surface)] rounded-[8px]">
-            <div class="p-4">
+          <div class="flex-grow flex flex-col min-h-0 bg-[var(--color-dark-surface)] rounded-[8px]">
+            <div class="p-4 flex-shrink-0">
               <span class="text-sm font-bold text-[var(--color-text-white)]">{{ t('app.commsLog') }}</span>
             </div>
             <div id="chat-scroll" class="flex-grow overflow-y-auto px-4 space-y-4 custom-scrollbar">
@@ -1093,7 +1196,7 @@ watch(isLoggedIn, (val) => {
                 </div>
               </div>
             </div>
-            <div class="p-4">
+            <div class="p-4 flex-shrink-0">
               <div class="relative flex items-center">
                 <input v-model="chatInput" @keyup.enter="sendChat" type="text" class="w-full bg-[var(--color-mid-dark)] p-3 pr-16 text-sm focus:outline-none text-[var(--color-text-white)] placeholder-[var(--color-text-silver)] rounded-[500px] shadow-[var(--shadow-spotify-inset)]" :placeholder="t('app.inputMessage')">
                 <button @click="sendChat" class="absolute right-2 top-1.5 bottom-1.5 px-4 bg-[var(--color-text-white)] hover:bg-[var(--color-spotify-green)] hover:scale-105 text-[var(--color-near-black)] transition-all font-bold text-xs uppercase tracking-[1.4px] rounded-[500px] flex items-center justify-center">
