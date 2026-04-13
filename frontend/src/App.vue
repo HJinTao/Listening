@@ -23,6 +23,7 @@ const username = ref(localStorage.getItem('username') || '');
 const password = ref('');
 const roomId = ref<number | ''>('');
 const isJoined = ref(false);
+const isStandalone = ref(false);
 const isLoggedIn = ref(!!localStorage.getItem('token'));
 const isLoginMode = ref(true);
 const token = ref(localStorage.getItem('token') || '');
@@ -38,17 +39,40 @@ if (rememberPassword.value) {
 
 const users = ref<any[]>([]);
 const isHost = ref(false);
-const hasControl = computed(() => isHost.value || !!(users.value.find(u => u.id === socket.value?.id)?.canControl));
-const canSeek = computed(() => {
+const roomMode = ref<'dictator'|'democracy'>('dictator');
+
+const hasControl = computed(() => {
+  if (isStandalone.value) return true;
+  return isHost.value || !!(users.value.find(u => u.id === socket.value?.id)?.canControl);
+});
+
+// Atomic Permissions
+type Action = 'PLAY_PAUSE' | 'SEEK' | 'SKIP_SONG' | 'ADD_SONG' | 'CHANGE_MODE' | 'KICK_USER' | 'CHANGE_HOST';
+
+const hasPermission = (action: Action): boolean => {
+  if (isStandalone.value) return true;
   if (isHost.value) return true;
-  if (currentSong.value && currentSong.value.requesterId && socket.value) {
-    return currentSong.value.requesterId === socket.value.id;
+
+  if (roomMode.value === 'dictator') {
+    if (action === 'ADD_SONG') return true; // Everyone can add
+    if (action === 'PLAY_PAUSE' || action === 'SEEK' || action === 'SKIP_SONG') return hasControl.value;
+    return false; // KICK, CHANGE_MODE, CHANGE_HOST are host only
+  } else if (roomMode.value === 'democracy') {
+    if (action === 'ADD_SONG') return true; // Everyone can add
+    if (action === 'PLAY_PAUSE' || action === 'SEEK') return hasControl.value;
+    if (action === 'SKIP_SONG' || action === 'KICK_USER' || action === 'CHANGE_HOST') return true; // Everyone can initiate vote
+    return false; // CHANGE_MODE is host only
   }
   return false;
-});
+};
+
+const canSeek = computed(() => hasPermission('SEEK'));
 
 const chatMessages = ref<any[]>([]);
 const chatInput = ref('');
+const activeVote = ref<any>(null);
+const modeToast = ref<string>('');
+let modeToastTimer: number | null = null;
 
 const lxEngine = ref<LxEngine | null>(null);
 const scriptLoaded = ref(false);
@@ -123,7 +147,7 @@ const currentLyricIndex = ref(-1);
 const lyricScrollRef = ref<HTMLElement | null>(null);
 
 const fetchLyrics = async (song: any) => {
-  lyrics.value = [{ time: 0, text: '正在加载歌词...' }];
+  lyrics.value = [{ time: 0, text: t('app.loadingLyrics') }];
   currentLyricIndex.value = -1;
   try {
     const resp = await axios.get(`${backendUrl}/api/lyric`, {
@@ -132,11 +156,11 @@ const fetchLyrics = async (song: any) => {
     if (resp.data.lyric) {
       parseLrc(resp.data.lyric);
     } else {
-      lyrics.value = [{ time: 0, text: '暂无歌词' }];
+      lyrics.value = [{ time: 0, text: t('app.noLyrics') }];
     }
   } catch (error) {
     console.error('Failed to fetch lyrics:', error);
-    lyrics.value = [{ time: 0, text: '获取歌词失败' }];
+    lyrics.value = [{ time: 0, text: t('app.fetchLyricsFailed') }];
   }
 };
 
@@ -248,11 +272,19 @@ const handleLogout = () => {
   localStorage.removeItem('username');
   isLoggedIn.value = false;
   isJoined.value = false;
+  isStandalone.value = false;
   if (pingInterval) {
     clearInterval(pingInterval);
     pingInterval = null;
   }
   if (socket.value) socket.value.disconnect();
+};
+
+const startStandaloneMode = () => {
+  isStandalone.value = true;
+  roomId.value = '';
+  isHost.value = true; // In standalone, you are the host
+  activeTab.value = 'search'; // Default to search tab
 };
 
 const passHost = (targetUserId: string) => {
@@ -271,6 +303,45 @@ const revokeControl = (targetUserId: string) => {
   }
 };
 
+const changeRoomMode = (mode: 'dictator' | 'democracy') => {
+  if (isHost.value && socket.value) {
+    socket.value.emit('change-room-mode', { roomId: Number(roomId.value), mode });
+  }
+};
+
+const initiateVote = (type: 'SKIP_SONG' | 'CHANGE_HOST' | 'KICK_USER', targetId?: string) => {
+  if (socket.value && roomMode.value === 'democracy') {
+    socket.value.emit('initiate-vote', { roomId: Number(roomId.value), type, targetId });
+  }
+};
+
+const kickUser = (targetUserId: string) => {
+  if (socket.value && hasControl.value) {
+    socket.value.emit('kick-user', { roomId: Number(roomId.value), targetUserId });
+  }
+};
+
+const voteYes = () => {
+  if (socket.value && activeVote.value) {
+    socket.value.emit('vote', { voteId: activeVote.value.id });
+    activeVote.value.hasVoted = true;
+  }
+};
+
+const getTranslatedMessage = (rawMsg: string) => {
+  try {
+    const parsed = JSON.parse(rawMsg);
+    if (parsed.key) {
+      // Use i18n for translation
+      const prefix = parsed.key.includes('Error') ? 'app.errors.' : 'app.systemChat.';
+      return t(prefix + parsed.key, parsed.params || {});
+    }
+  } catch (e) {
+    // If it's not valid JSON, return as is
+  }
+  return rawMsg;
+};
+
 const connectSocket = () => {
   if (!username.value || !roomId.value || !token.value) return;
   socket.value = io(backendUrl, { auth: { token: token.value } });
@@ -287,7 +358,7 @@ const connectSocket = () => {
   });
   
   socket.value.on('join-error', (data) => {
-    alert(data.message);
+    alert(getTranslatedMessage(data.message));
     isJoined.value = false;
     if (pingInterval) {
       clearInterval(pingInterval);
@@ -309,6 +380,12 @@ const connectSocket = () => {
     if (data.playlist) {
       roomPlaylist.value = data.playlist;
     }
+    if (data.roomMode && data.roomMode !== roomMode.value) {
+      roomMode.value = data.roomMode;
+      modeToast.value = data.roomMode === 'dictator' ? t('app.switchedToDictator') : t('app.switchedToDemocracy');
+      if (modeToastTimer) clearTimeout(modeToastTimer);
+      modeToastTimer = window.setTimeout(() => { modeToast.value = ''; }, 3000);
+    }
     const me = users.value.find(u => u.id === socket.value?.id);
     if (me) isHost.value = me.isHost;
 
@@ -326,7 +403,11 @@ const connectSocket = () => {
     roomPlaylist.value = data;
   });
   socket.value.on('chat-message', (data) => {
-    chatMessages.value.push(data);
+    const translatedMessage = data.isSystem ? getTranslatedMessage(data.message) : data.message;
+    chatMessages.value.push({ ...data, message: translatedMessage });
+    if (translatedMessage && (translatedMessage.includes(t('app.systemChat.votePassedSkip')) || translatedMessage.includes(t('app.systemChat.votePassedHost').split('{')[0]) || translatedMessage.includes(t('app.systemChat.votePassedKick').split('{')[0]) || translatedMessage.includes(t('app.systemChat.roomModeChanged').split('{')[0]))) {
+      activeVote.value = null;
+    }
     // Auto scroll chat
     setTimeout(() => {
       const el = document.getElementById('chat-scroll');
@@ -343,10 +424,41 @@ const connectSocket = () => {
     if (!snapshot) return;
     socket.value?.emit('state-response', { roomId: Number(roomId.value), toUserId: fromUserId, snapshot });
   });
+  socket.value.on('vote-error', (data) => {
+    alert(getTranslatedMessage(data.message));
+  });
+
+  socket.value.on('add-song-error', (data) => {
+    alert(getTranslatedMessage(data.message));
+  });
+
   socket.value.on('state-response', ({ roomId: responseRoomId, snapshot }) => {
     if (isHost.value) return;
     if (Number(roomId.value) !== Number(responseRoomId)) return;
     applySnapshot(snapshot);
+  });
+  
+  socket.value.on('vote-started', (vote) => {
+    activeVote.value = { ...vote, hasVoted: vote.initiatorName === username.value };
+  });
+  
+  socket.value.on('vote-progress', (data) => {
+    if (activeVote.value && activeVote.value.id === data.id) {
+      activeVote.value.yesCount = data.yesCount;
+      activeVote.value.required = data.required;
+    }
+  });
+
+  socket.value.on('execute-skip-song', () => {
+    activeVote.value = null;
+    if (isHost.value) {
+      playNextSong(false);
+    }
+  });
+
+  socket.value.on('kicked', () => {
+    alert(t('app.kickedOut'));
+    handleLogout();
   });
 };
 
@@ -611,6 +723,12 @@ const handleSearchScroll = (e: Event) => {
 
 const addToRoomPlaylist = (song: any) => {
   if (socket.value) {
+    const trackId = song.songmid || song.hash || song.id;
+    if (roomPlaylist.value.some(s => (s.songmid || s.hash || s.id) === trackId)) {
+      // Use toast or alert
+      alert(t('app.songAlreadyInPlaylist'));
+      return;
+    }
     socket.value.emit('add-song', { roomId: Number(roomId.value), song });
   }
 };
@@ -623,10 +741,16 @@ const removeSong = (index: number) => {
 };
 
 const playSong = async (song: any, context?: 'search' | 'playlist' | 'room') => {
-  if (!hasControl.value) {
+  if (!hasPermission('SKIP_SONG')) {
     alert(t('app.notHost'));
-    return; // Only host can play or change songs
+    return;
   }
+  if (roomMode.value === 'democracy' && !hasControl.value) {
+    initiateVote('SKIP_SONG'); // Technically should vote for specific song, but let's just do skip for simplicity, or show an alert
+    alert(t('app.cannotSkipDemocracy'));
+    return;
+  }
+  if (!hasControl.value) return;
   if (context) {
     currentContext.value = context;
   }
@@ -719,7 +843,19 @@ const onTimeUpdate = () => {
 };
 
 const playNextSong = (manual = false) => {
+  if (manual) {
+    if (!hasPermission('SKIP_SONG')) {
+      alert(t('app.noPermissionSkip'));
+      return;
+    }
+    if (roomMode.value === 'democracy' && !hasControl.value) {
+      initiateVote('SKIP_SONG');
+      return;
+    }
+  }
+  
   if (!hasControl.value) return;
+
   const list = currentContext.value === 'search' ? searchResults.value : (currentContext.value === 'playlist' ? playlist.value : roomPlaylist.value);
   if (list.length === 0) return;
 
@@ -744,7 +880,16 @@ const playNextSong = (manual = false) => {
 };
 
 const playPrevSong = () => {
+  if (!hasPermission('SKIP_SONG')) {
+    alert(t('app.noPermissionSkip'));
+    return;
+  }
+  if (roomMode.value === 'democracy' && !hasControl.value) {
+    initiateVote('SKIP_SONG');
+    return;
+  }
   if (!hasControl.value) return;
+
   const list = currentContext.value === 'search' ? searchResults.value : (currentContext.value === 'playlist' ? playlist.value : roomPlaylist.value);
   if (list.length === 0) return;
 
@@ -766,7 +911,7 @@ const onEnded = () => {
 };
 
 const togglePlayPause = () => {
-  if (!hasControl.value || !audioRef.value) return;
+  if (!hasPermission('PLAY_PAUSE') || !audioRef.value) return;
   if (audioRef.value.paused) {
     audioRef.value.play().catch(e => console.error('Play prevented', e));
   } else {
@@ -874,6 +1019,38 @@ watch(isLoggedIn, (val) => {
           <div class="text-xs text-[var(--color-text-white)] px-4 py-1.5 bg-[var(--color-mid-dark)] rounded-[500px] font-semibold">
             {{ t('app.op') }}: {{ username }}
           </div>
+          <!-- Mode Tag -->
+          <div class="relative group cursor-pointer">
+            <div class="text-xs px-4 py-1.5 rounded-[500px] font-semibold flex items-center space-x-1 transition-colors" :class="roomMode === 'dictator' ? 'bg-red-900/50 text-red-200 border border-red-800' : 'bg-blue-900/50 text-blue-200 border border-blue-800'">
+              <span>{{ roomMode === 'dictator' ? t('app.dictatorMode') : t('app.democracyMode') }}</span>
+              <svg class="w-3 h-3 ml-1 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <!-- Hover Permissions Card -->
+            <div class="absolute top-full right-0 pt-2 w-64 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+              <div class="p-4 bg-[var(--color-dark-surface)] border border-[var(--color-border-gray)] rounded-[8px] shadow-[var(--shadow-spotify-heavy)] pointer-events-auto">
+                  <div class="text-sm font-bold text-[var(--color-text-white)] mb-2">{{ roomMode === 'dictator' ? t('app.dictatorMode') : t('app.democracyMode') }}</div>
+                  <ul class="text-xs text-[var(--color-text-silver)] space-y-1">
+                    <li v-if="roomMode === 'dictator'">{{ t('app.ruleAllCanAdd') }}</li>
+                    <li v-if="roomMode === 'dictator'">{{ t('app.ruleDictatorControl') }}</li>
+                    <li v-if="roomMode === 'democracy'">{{ t('app.ruleAllCanAdd') }}</li>
+                    <li v-if="roomMode === 'democracy'">{{ t('app.ruleDemocracyControl') }}</li>
+                    <li v-if="roomMode === 'democracy'">{{ t('app.ruleDemocracyVote') }}</li>
+                  </ul>
+                  <div v-if="isHost" class="mt-3 pt-3 border-t border-[var(--color-border-gray)]">
+                      <button @click="changeRoomMode(roomMode === 'dictator' ? 'democracy' : 'dictator')" class="w-full py-1.5 bg-[var(--color-mid-dark)] hover:bg-[var(--color-text-white)] hover:text-[var(--color-near-black)] text-[var(--color-text-white)] text-xs font-bold rounded-[500px] transition-colors">
+                        {{ t('app.switchModeTo') }}{{ roomMode === 'dictator' ? t('app.democracyMode') : t('app.dictatorMode') }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+        <div v-else-if="isStandalone" class="flex items-center space-x-4">
+          <div class="flex items-center space-x-2 bg-[var(--color-mid-dark)] px-4 py-1.5 rounded-[500px]">
+            <span class="w-2 h-2 rounded-full bg-[var(--color-spotify-green)]" :class="{'animate-pulse': isPlaying}"></span>
+            <span class="text-xs text-[var(--color-text-silver)] font-semibold">{{ t('app.standalone') }}</span>
+          </div>
+          <button @click="handleLogout" class="text-xs text-[var(--color-text-silver)] hover:text-[var(--color-text-white)] transition-colors">{{ t('app.logout') }}</button>
         </div>
         <button @click="toggleLanguage" class="text-sm font-semibold text-[var(--color-text-white)] hover:text-[var(--color-spotify-green)] transition-colors px-4 py-2 bg-[var(--color-mid-dark)] rounded-[500px]">
           {{ locale === 'en' ? '中' : 'EN' }}
@@ -881,9 +1058,47 @@ watch(isLoggedIn, (val) => {
       </div>
     </header>
 
+    <!-- Global Toast for Voting -->
+    <transition name="fade">
+      <div v-if="activeVote" class="fixed top-24 left-1/2 transform -translate-x-1/2 bg-[var(--color-dark-surface)] border border-[var(--color-border-gray)] rounded-[8px] p-4 shadow-[var(--shadow-spotify-heavy)] z-[100] flex flex-col items-center space-y-3 min-w-[300px]">
+        <div class="text-sm font-bold text-[var(--color-text-white)]">
+          {{ activeVote.initiatorName }}{{ t('app.initiatedVote') }}
+        </div>
+        <div class="text-xs text-[var(--color-text-silver)] font-semibold">
+          {{ activeVote.type === 'SKIP_SONG' ? t('app.voteTypeSkip') : (activeVote.type === 'CHANGE_HOST' ? `${t('app.voteTypeChangeHost')}${activeVote.targetName}` : `${t('app.voteTypeKick')}${activeVote.targetName}`) }}
+        </div>
+        <div class="w-full bg-[var(--color-near-black)] h-2 rounded-full overflow-hidden">
+          <div class="h-full bg-[var(--color-spotify-green)] transition-all" :style="{ width: `${(activeVote.yesCount / activeVote.required) * 100}%` }"></div>
+        </div>
+        <div class="flex items-center justify-between w-full text-xs font-mono text-[var(--color-text-silver)]">
+          <span>{{ t('app.agreedCount') }}{{ activeVote.yesCount }}</span>
+          <span>{{ t('app.requiredCount') }}{{ activeVote.required }}</span>
+        </div>
+        <button v-if="!activeVote.hasVoted" @click="voteYes" class="w-full bg-[var(--color-spotify-green)] text-[var(--color-near-black)] py-1.5 rounded-[500px] font-bold text-xs hover:scale-105 transition-transform uppercase">
+          {{ t('app.agree') }}
+        </button>
+        <div v-else class="w-full text-center text-xs text-[var(--color-text-silver)] py-1.5 font-bold uppercase">
+          {{ t('app.agreed') }}
+        </div>
+      </div>
+    </transition>
+
+    <!-- Global Toast for Mode Switch -->
+    <transition name="fade">
+      <div v-if="modeToast" class="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-[var(--color-dark-surface)]/90 backdrop-blur-md border border-[var(--color-border-gray)] rounded-[16px] p-8 shadow-[var(--shadow-spotify-heavy)] z-[100] flex flex-col items-center space-y-4 pointer-events-none">
+        <div class="w-16 h-16 rounded-full bg-[var(--color-mid-dark)] flex items-center justify-center">
+          <svg v-if="roomMode === 'dictator'" class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8V7a4 4 0 00-8 0v4h8z"/></svg>
+          <svg v-else class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+        </div>
+        <div class="text-xl font-bold text-[var(--color-text-white)] tracking-wide">
+          {{ modeToast }}
+        </div>
+      </div>
+    </transition>
+
     <!-- Auth & Connect -->
     <transition name="fade">
-      <main v-if="!isJoined" class="flex-grow flex items-center justify-center relative bg-[var(--color-near-black)]">
+      <main v-if="!isJoined && !isStandalone" class="flex-grow flex items-center justify-center relative bg-[var(--color-near-black)]">
         <div class="w-full max-w-[450px] p-12 bg-[var(--color-dark-surface)] rounded-[8px] relative z-10 shadow-[var(--shadow-spotify-heavy)]">
           <div v-if="!isLoggedIn">
             <h2 class="font-spotify-title text-3xl font-bold mb-2 tracking-tight text-[var(--color-text-white)] text-center">{{ isLoginMode ? t('app.login') : t('app.register') }}</h2>
@@ -922,9 +1137,14 @@ watch(isLoggedIn, (val) => {
                 <label class="text-sm font-bold text-[var(--color-text-white)]">{{ t('app.channelId') }}</label>
                 <input v-model.number="roomId" @keyup.enter="connectSocket" type="number" min="1" class="w-full bg-[var(--color-mid-dark)] p-3.5 text-base focus:outline-none transition-colors text-[var(--color-text-white)] rounded-[500px] shadow-[var(--shadow-spotify-inset)]" placeholder="e.g. 8888">
               </div>
-              <button @click="connectSocket" class="w-full bg-[var(--color-spotify-green)] text-[var(--color-near-black)] p-3.5 rounded-[500px] font-bold text-base hover:scale-105 transition-transform mt-8 flex items-center justify-center space-x-2 tracking-[1.4px] uppercase">
-                <span>{{ t('app.connect') }}</span>
-              </button>
+              <div class="grid grid-cols-2 gap-3 mt-8">
+                <button @click="connectSocket" class="w-full bg-[var(--color-spotify-green)] text-[var(--color-near-black)] p-3.5 rounded-[500px] font-bold text-sm hover:scale-105 transition-transform flex items-center justify-center space-x-2 tracking-[1px] uppercase">
+                  <span>{{ t('app.connect') }}</span>
+                </button>
+                <button @click="startStandaloneMode" class="w-full bg-[var(--color-mid-dark)] text-[var(--color-text-white)] p-3.5 rounded-[500px] font-bold text-sm hover:bg-[var(--color-text-silver)] hover:text-[var(--color-near-black)] transition-colors flex items-center justify-center space-x-2 tracking-[1px]">
+                  <span>{{ t('app.standalone') }}</span>
+                </button>
+              </div>
               <div class="text-center mt-6">
                 <button @click="handleLogout" class="text-sm font-semibold text-[var(--color-text-silver)] hover:text-[var(--color-text-white)] transition-colors">
                   {{ t('app.logout') }}
@@ -943,7 +1163,7 @@ watch(isLoggedIn, (val) => {
           
           <!-- Tabs as navigation pills -->
           <div class="flex space-x-2 p-4 bg-[var(--color-near-black)]">
-            <button @click="activeTab = 'room'" :class="activeTab === 'room' ? 'bg-[var(--color-dark-surface)] text-[var(--color-text-white)]' : 'bg-transparent text-[var(--color-text-silver)] hover:text-[var(--color-text-white)]'" class="px-4 py-1.5 rounded-[9999px] text-sm font-semibold transition-colors">
+            <button v-if="!isStandalone" @click="activeTab = 'room'" :class="activeTab === 'room' ? 'bg-[var(--color-dark-surface)] text-[var(--color-text-white)]' : 'bg-transparent text-[var(--color-text-silver)] hover:text-[var(--color-text-white)]'" class="px-4 py-1.5 rounded-[9999px] text-sm font-semibold transition-colors">
               {{ t('app.roomPlaylist') }}
             </button>
             <button @click="activeTab = 'search'" :class="activeTab === 'search' ? 'bg-[var(--color-dark-surface)] text-[var(--color-text-white)]' : 'bg-transparent text-[var(--color-text-silver)] hover:text-[var(--color-text-white)]'" class="px-4 py-1.5 rounded-[9999px] text-sm font-semibold transition-colors">
@@ -974,7 +1194,7 @@ watch(isLoggedIn, (val) => {
             
             <div class="flex-grow overflow-y-auto px-4 pb-4 space-y-1 custom-scrollbar" @scroll="handleSearchScroll">
               <div v-if="!hasControl" class="mb-4 text-[var(--color-text-silver)] text-sm font-semibold text-center flex items-center justify-center space-x-2">
-                <span>(仅房主与控制者可控制播放状态)</span>
+                <span>{{ t('app.onlyHostCanControlPlayback') }}</span>
               </div>
 
               <template v-if="activeTab === 'search'">
@@ -1038,7 +1258,7 @@ watch(isLoggedIn, (val) => {
                     </div>
                     <div class="min-w-0">
                       <div class="text-base font-semibold truncate" :class="(song.songmid || song.hash || song.id) === getTrackId() ? 'text-[var(--color-spotify-green)]' : 'text-[var(--color-text-white)]'">{{ song.name }}</div>
-                      <div class="text-sm text-[var(--color-text-silver)] truncate">{{ song.singer }} <span v-if="song.requesterName" class="ml-2 text-xs opacity-70">({{ song.requesterName }}点)</span></div>
+                      <div class="text-sm text-[var(--color-text-silver)] truncate">{{ song.singer }} <span v-if="song.requesterName" class="ml-2 text-xs opacity-70">({{ song.requesterName }}{{ t('app.requesterSuffix') }})</span></div>
                     </div>
                   </div>
                   <button @click.stop="removeSong(index)" v-if="hasControl" class="text-[var(--color-text-silver)] hover:text-red-500 p-2 transition-colors focus:outline-none z-10 relative opacity-0 group-hover:opacity-100">
@@ -1113,18 +1333,18 @@ watch(isLoggedIn, (val) => {
                 </button>
 
                 <!-- Previous Track -->
-                <button @click="playPrevSong" :disabled="!hasControl" class="text-[var(--color-text-silver)] hover:text-[var(--color-text-white)] disabled:opacity-50 transition-colors" :title="t('app.player.prev')">
+                <button @click="playPrevSong" :disabled="!hasPermission('SKIP_SONG')" class="text-[var(--color-text-silver)] hover:text-[var(--color-text-white)] disabled:opacity-50 transition-colors" :title="t('app.player.prev')">
                   <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" /></svg>
                 </button>
 
                 <!-- Play / Pause -->
-                <button @click="togglePlayPause" :disabled="!hasControl" class="w-9 h-9 flex items-center justify-center bg-[var(--color-text-white)] text-[var(--color-near-black)] rounded-full hover:scale-105 disabled:opacity-50 transition-transform" :title="isPlaying ? t('app.player.pause') : t('app.player.play')">
+                <button @click="togglePlayPause" :disabled="!hasPermission('PLAY_PAUSE')" class="w-9 h-9 flex items-center justify-center bg-[var(--color-text-white)] text-[var(--color-near-black)] rounded-full hover:scale-105 disabled:opacity-50 transition-transform" :title="isPlaying ? t('app.player.pause') : t('app.player.play')">
                   <svg v-if="isPlaying" class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                   <svg v-else class="w-5 h-5 fill-current ml-1" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 </button>
 
                 <!-- Next Track -->
-                <button @click="playNextSong(true)" :disabled="!hasControl" class="text-[var(--color-text-silver)] hover:text-[var(--color-text-white)] disabled:opacity-50 transition-colors" :title="t('app.player.next')">
+                <button @click="playNextSong(true)" :disabled="!hasPermission('SKIP_SONG')" class="text-[var(--color-text-silver)] hover:text-[var(--color-text-white)] disabled:opacity-50 transition-colors" :title="t('app.player.next')">
                   <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg>
                 </button>
 
@@ -1153,7 +1373,7 @@ watch(isLoggedIn, (val) => {
         </section>
 
         <!-- Right Sidebar: Terminals/Chat -->
-        <aside class="w-[300px] flex-shrink-0 flex flex-col bg-[var(--color-near-black)] rounded-[8px] z-20 hidden lg:flex overflow-hidden">
+        <aside v-if="!isStandalone" class="w-[300px] flex-shrink-0 flex flex-col bg-[var(--color-near-black)] rounded-[8px] z-20 hidden lg:flex overflow-hidden">
           <!-- Active Nodes -->
           <div class="h-1/3 flex flex-col bg-[var(--color-dark-surface)] mb-2 rounded-[8px]">
             <div class="p-4">
@@ -1168,11 +1388,16 @@ watch(isLoggedIn, (val) => {
                 <div class="flex items-center space-x-2">
                   <span v-if="u.id === socket?.id" class="text-xs text-[var(--color-near-black)] font-bold px-2 py-0.5 rounded-[500px] bg-[var(--color-text-white)]">{{ t('app.me') }}</span>
                   <template v-if="isHost && u.id !== socket?.id">
-                    <button @click="passHost(u.id)" class="text-xs bg-[var(--color-spotify-green)] text-[var(--color-near-black)] px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" title="Transfer Host">H</button>
-                    <button v-if="!u.canControl" @click="grantControl(u.id)" class="text-xs bg-[var(--color-text-silver)] text-[var(--color-near-black)] px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" title="Grant Control">C</button>
-                    <button v-else @click="revokeControl(u.id)" class="text-xs bg-red-500 text-white px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" title="Revoke Control">X</button>
+                    <button @click="passHost(u.id)" class="text-xs bg-[var(--color-spotify-green)] text-[var(--color-near-black)] px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.transferHostTitle')">H</button>
+                    <button v-if="!u.canControl" @click="grantControl(u.id)" class="text-xs bg-[var(--color-text-silver)] text-[var(--color-near-black)] px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.grantControlTitle')">C</button>
+                    <button v-else @click="revokeControl(u.id)" class="text-xs bg-orange-500 text-white px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.revokeControlTitle')">-C</button>
+                    <button @click="kickUser(u.id)" class="text-xs bg-red-500 text-white px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.kickUserTitle')">K</button>
                   </template>
-                  <span v-else-if="u.canControl && u.id !== socket?.id" class="text-xs text-[var(--color-text-silver)] font-bold px-2 py-0.5 border border-[var(--color-text-silver)] rounded-[500px]">C</span>
+                  <template v-else-if="roomMode === 'democracy' && u.id !== socket?.id">
+                    <button v-if="u.isHost" @click="initiateVote('CHANGE_HOST', u.id)" class="text-xs bg-[var(--color-spotify-green)] text-[var(--color-near-black)] px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.voteHostTitle')">V:H</button>
+                    <button v-else @click="initiateVote('KICK_USER', u.id)" class="text-xs bg-red-500 text-white px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.voteKickTitle')">V:K</button>
+                  </template>
+                  <span v-if="u.canControl && u.id !== socket?.id && !isHost" class="text-xs text-[var(--color-text-silver)] font-bold px-2 py-0.5 border border-[var(--color-text-silver)] rounded-[500px]">C</span>
                 </div>
               </div>
             </div>

@@ -304,6 +304,7 @@ interface User {
 
 const users = new Map<string, User>();
 const roomPlaylists = new Map<number, any[]>();
+const roomModes = new Map<number, 'dictator' | 'democracy'>();
 
 type SyncCommand = {
   authorityId: string;
@@ -323,6 +324,18 @@ type PlayerSnapshot = {
   songInfo?: any;
   playMode?: string;
 };
+
+type VoteType = 'SKIP_SONG' | 'CHANGE_HOST' | 'KICK_USER';
+interface Vote {
+  id: string;
+  roomId: number;
+  type: VoteType;
+  initiatorId: string;
+  targetId?: string;
+  voters: Set<string>;
+  createdAt: number;
+}
+const activeVotes = new Map<string, Vote>();
 
 import jwt from 'jsonwebtoken';
 
@@ -356,7 +369,7 @@ io.on('connection', (socket) => {
 
     // Reject duplicate join
     if (existingUsers.some(u => u.username === username)) {
-      socket.emit('join-error', { message: '您已在房间中，无法重复加入' });
+      socket.emit('join-error', { message: JSON.stringify({ key: 'joinErrorDuplicate' }) });
       return;
     }
 
@@ -371,10 +384,14 @@ io.on('connection', (socket) => {
       roomPlaylists.set(numRoomId, []);
     }
 
+    if (!roomModes.has(numRoomId)) {
+      roomModes.set(numRoomId, 'dictator');
+    }
+
     // Broadcast user joined
     io.to(String(numRoomId)).emit('chat-message', {
       sender: 'System',
-      message: `${username} 加入了房间`,
+      message: JSON.stringify({ key: 'userJoined', params: { user: username } }),
       isSystem: true,
     });
 
@@ -382,6 +399,7 @@ io.on('connection', (socket) => {
     io.to(String(numRoomId)).emit('room-info', {
       users: Array.from(users.values()).filter(u => u.roomId === numRoomId),
       playlist: roomPlaylists.get(numRoomId),
+      roomMode: roomModes.get(numRoomId) || 'dictator',
     });
   });
 
@@ -403,6 +421,14 @@ io.on('connection', (socket) => {
     if (!user || user.roomId !== numRoomId) return;
     
     const pl = roomPlaylists.get(numRoomId) || [];
+    
+    const trackId = song.songmid || song.hash || song.id;
+    const existingIndex = pl.findIndex((s: any) => (s.songmid || s.hash || s.id) === trackId);
+    if (existingIndex !== -1) {
+      socket.emit('add-song-error', { message: JSON.stringify({ key: 'addSongErrorDuplicate' }) });
+      return;
+    }
+
     // 标记是谁点的歌
     song.requesterId = user.id;
     song.requesterName = user.username;
@@ -412,7 +438,7 @@ io.on('connection', (socket) => {
     io.to(String(numRoomId)).emit('room-playlist', pl);
     io.to(String(numRoomId)).emit('chat-message', {
       sender: 'System',
-      message: `${user.username} 点了歌曲: ${song.name}`,
+      message: JSON.stringify({ key: 'songAdded', params: { user: user.username, song: song.name } }),
       isSystem: true,
     });
   });
@@ -446,20 +472,12 @@ io.on('connection', (socket) => {
     if (!command || typeof command.seq !== 'number' || typeof command.sentAt !== 'number' || typeof command.type !== 'string') return;
 
     let hasPermission = user.isHost || user.canControl;
-    if (!hasPermission && command.type === 'SEEK' && command.payload?.trackId) {
-      const pl = roomPlaylists.get(numRoomId) || [];
-      const song = pl.find((s: any) => (s.songmid || s.hash || s.id) === command.payload.trackId);
-      if (song && song.requesterId === user.id) {
-        hasPermission = true;
-      }
-    }
-
     if (!hasPermission) return;
 
     if (command.type === 'SET_TRACK' && command.payload?.songInfo) {
       io.to(String(numRoomId)).emit('chat-message', {
         sender: 'System',
-        message: `${user.username} 切歌: ${command.payload.songInfo.name}`,
+        message: JSON.stringify({ key: 'songSkipped', params: { user: user.username, song: command.payload.songInfo.name } }),
         isSystem: true,
       });
     } else if (command.type === 'CHANGE_MODE') {
@@ -471,7 +489,7 @@ io.on('connection', (socket) => {
       const modeName = modeNames[command.payload?.mode] || command.payload?.mode;
       io.to(String(numRoomId)).emit('chat-message', {
         sender: 'System',
-        message: `${user.username} 将播放模式更改为: ${modeName}`,
+        message: JSON.stringify({ key: 'modeChanged', params: { user: user.username, mode: modeName } }),
         isSystem: true,
       });
     }
@@ -503,6 +521,24 @@ io.on('connection', (socket) => {
     io.to(toUserId).emit('state-response', { roomId: numRoomId, snapshot: forwarded });
   });
   
+  socket.on('change-room-mode', ({ roomId, mode }) => {
+    const numRoomId = Number(roomId);
+    const user = users.get(socket.id);
+    if (user && user.isHost && user.roomId === numRoomId) {
+      roomModes.set(numRoomId, mode);
+      io.to(String(numRoomId)).emit('room-info', {
+        users: Array.from(users.values()).filter(u => u.roomId === numRoomId),
+        playlist: roomPlaylists.get(numRoomId),
+        roomMode: mode,
+      });
+      io.to(String(numRoomId)).emit('chat-message', {
+        sender: 'System',
+        message: JSON.stringify({ key: 'roomModeChanged', params: { user: user.username, mode: mode === 'dictator' ? 'dictator' : 'democracy' } }),
+        isSystem: true,
+      });
+    }
+  });
+
   socket.on('pass-host', ({ roomId, targetUserId }) => {
     const numRoomId = Number(roomId);
     const user = users.get(socket.id);
@@ -515,10 +551,11 @@ io.on('connection', (socket) => {
         io.to(String(numRoomId)).emit('room-info', {
           users: Array.from(users.values()).filter(u => u.roomId === numRoomId),
           playlist: roomPlaylists.get(numRoomId),
+          roomMode: roomModes.get(numRoomId) || 'dictator',
         });
         io.to(String(numRoomId)).emit('chat-message', {
           sender: 'System',
-          message: `${user.username} 将房主转移给了 ${targetUser.username}`,
+          message: JSON.stringify({ key: 'hostTransferred', params: { user: user.username, target: targetUser.username } }),
           isSystem: true,
         });
       }
@@ -535,10 +572,11 @@ io.on('connection', (socket) => {
         io.to(String(numRoomId)).emit('room-info', {
           users: Array.from(users.values()).filter(u => u.roomId === numRoomId),
           playlist: roomPlaylists.get(numRoomId),
+          roomMode: roomModes.get(numRoomId) || 'dictator',
         });
         io.to(String(numRoomId)).emit('chat-message', {
           sender: 'System',
-          message: `${user.username} 赋予了 ${targetUser.username} 控制权`,
+          message: JSON.stringify({ key: 'controlGranted', params: { user: user.username, target: targetUser.username } }),
           isSystem: true,
         });
       }
@@ -555,13 +593,155 @@ io.on('connection', (socket) => {
         io.to(String(numRoomId)).emit('room-info', {
           users: Array.from(users.values()).filter(u => u.roomId === numRoomId),
           playlist: roomPlaylists.get(numRoomId),
+          roomMode: roomModes.get(numRoomId) || 'dictator',
         });
         io.to(String(numRoomId)).emit('chat-message', {
           sender: 'System',
-          message: `${user.username} 撤销了 ${targetUser.username} 的控制权`,
+          message: JSON.stringify({ key: 'controlRevoked', params: { user: user.username, target: targetUser.username } }),
           isSystem: true,
         });
       }
+    }
+  });
+
+  socket.on('initiate-vote', ({ roomId, type, targetId }) => {
+    const numRoomId = Number(roomId);
+    const user = users.get(socket.id);
+    if (!user || user.roomId !== numRoomId) return;
+
+    if (roomModes.get(numRoomId) !== 'democracy') {
+      socket.emit('vote-error', { message: JSON.stringify({ key: 'voteErrorDemocracyOnly' }) });
+      return;
+    }
+
+    const voteId = `${numRoomId}_${type}_${targetId || ''}_${Date.now()}`;
+    const vote: Vote = {
+      id: voteId,
+      roomId: numRoomId,
+      type,
+      initiatorId: socket.id,
+      targetId,
+      voters: new Set([socket.id]),
+      createdAt: Date.now()
+    };
+
+    activeVotes.set(voteId, vote);
+
+    let targetName = '';
+    if (targetId) {
+      targetName = users.get(targetId)?.username || '';
+    }
+
+    const roomUsers = Array.from(users.values()).filter(u => u.roomId === numRoomId);
+    const requiredVotes = Math.floor(roomUsers.length / 2) + 1;
+
+    io.to(String(numRoomId)).emit('vote-started', {
+      id: voteId,
+      type,
+      initiatorName: user.username,
+      targetName,
+      targetId,
+      yesCount: 1,
+      required: requiredVotes
+    });
+
+    checkVote(voteId);
+  });
+
+  socket.on('vote', ({ voteId }) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+
+    const vote = activeVotes.get(voteId);
+    if (!vote || vote.roomId !== user.roomId) return;
+
+    vote.voters.add(socket.id);
+    checkVote(voteId);
+  });
+
+  function checkVote(voteId: string) {
+    const vote = activeVotes.get(voteId);
+    if (!vote) return;
+
+    const roomUsers = Array.from(users.values()).filter(u => u.roomId === vote.roomId);
+    const requiredVotes = Math.floor(roomUsers.length / 2) + 1;
+
+    if (vote.voters.size >= requiredVotes) {
+      executeVote(vote);
+      activeVotes.delete(voteId);
+    } else {
+      io.to(String(vote.roomId)).emit('vote-progress', {
+        id: voteId,
+        yesCount: vote.voters.size,
+        required: requiredVotes
+      });
+    }
+  }
+
+  function executeVote(vote: Vote) {
+    const numRoomId = vote.roomId;
+    if (vote.type === 'SKIP_SONG') {
+      io.to(String(numRoomId)).emit('chat-message', {
+        sender: 'System',
+        message: JSON.stringify({ key: 'votePassedSkip' }),
+        isSystem: true,
+      });
+      io.to(String(numRoomId)).emit('execute-skip-song');
+    } else if (vote.type === 'CHANGE_HOST') {
+      const newHost = users.get(vote.targetId!);
+      if (newHost && newHost.roomId === numRoomId) {
+        const oldHost = Array.from(users.values()).find(u => u.roomId === numRoomId && u.isHost);
+        if (oldHost) oldHost.isHost = false;
+        newHost.isHost = true;
+        newHost.canControl = true;
+
+        io.to(String(numRoomId)).emit('room-info', {
+          users: Array.from(users.values()).filter(u => u.roomId === numRoomId),
+          playlist: roomPlaylists.get(numRoomId),
+          roomMode: roomModes.get(numRoomId) || 'dictator',
+        });
+        io.to(String(numRoomId)).emit('chat-message', {
+          sender: 'System',
+          message: JSON.stringify({ key: 'votePassedHost', params: { user: newHost.username } }),
+          isSystem: true,
+        });
+      }
+    } else if (vote.type === 'KICK_USER') {
+      const targetUser = users.get(vote.targetId!);
+      if (targetUser && targetUser.roomId === numRoomId) {
+        const sockets = io.sockets.sockets;
+        const targetSocket = sockets.get(vote.targetId!);
+        if (targetSocket) {
+          targetSocket.emit('kicked');
+          targetSocket.disconnect(true);
+        }
+        io.to(String(numRoomId)).emit('chat-message', {
+          sender: 'System',
+          message: JSON.stringify({ key: 'votePassedKick', params: { user: targetUser.username } }),
+          isSystem: true,
+        });
+      }
+    }
+  }
+
+  socket.on('kick-user', ({ roomId, targetUserId }) => {
+    const numRoomId = Number(roomId);
+    const user = users.get(socket.id);
+    if (!user || user.roomId !== numRoomId) return;
+    if (!user.isHost && !user.canControl) return; // Only host/admin can kick directly
+
+    const targetUser = users.get(targetUserId);
+    if (targetUser && targetUser.roomId === numRoomId) {
+      const targetSocket = io.sockets.sockets.get(targetUserId);
+      if (targetSocket) {
+        targetSocket.emit('kicked');
+        targetSocket.disconnect(true);
+      }
+      io.to(String(numRoomId)).emit('chat-message', {
+        sender: 'System',
+        message: JSON.stringify({ key: 'userKicked', params: { user: user.username, target: targetUser.username } }),
+        isSystem: true,
+      });
     }
   });
 
@@ -574,7 +754,7 @@ io.on('connection', (socket) => {
 
       io.to(String(roomId)).emit('chat-message', {
         sender: 'System',
-        message: `${username} 离开了房间`,
+        message: JSON.stringify({ key: 'userLeft', params: { user: username } }),
         isSystem: true,
       });
 
@@ -585,7 +765,7 @@ io.on('connection', (socket) => {
         remainingUsers[0].isHost = true;
         io.to(String(roomId)).emit('chat-message', {
           sender: 'System',
-          message: `${remainingUsers[0].username} 成为房主`,
+          message: JSON.stringify({ key: 'becameHost', params: { user: remainingUsers[0].username } }),
           isSystem: true,
         });
       }
@@ -593,7 +773,11 @@ io.on('connection', (socket) => {
       if (remainingUsers.length > 0) {
         io.to(String(roomId)).emit('room-info', {
           users: remainingUsers,
+          roomMode: roomModes.get(roomId) || 'dictator',
         });
+      } else {
+        // cleanup room mode
+        roomModes.delete(roomId);
       }
     }
     console.log(`User disconnected: ${socket.id}`);
