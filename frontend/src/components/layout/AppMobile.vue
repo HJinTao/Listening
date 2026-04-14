@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { 
-  activeTab, isStandalone, isMobilePlayerOpen, isMobileDrawerOpen, currentUrl, currentSong
+  activeTab, isStandalone, isMobilePlayerOpen, isMobileDrawerOpen, currentUrl, currentSong, isPlaying
 } from '../../store/state';
 import { usePlayer } from '../../composables/usePlayer';
 import { useI18n } from 'vue-i18n';
@@ -21,19 +21,24 @@ const handlePlayPause = () => {
     togglePlayPause();
   }
 };
+
+const switchTab = (tab: string) => {
+  activeTab.value = tab;
+  isMobilePlayerOpen.value = false;
+};
 </script>
 
 <template>
   <main class="flex-grow flex flex-col overflow-hidden bg-[var(--color-near-black)] p-2 gap-2 relative">
     
     <!-- Active Tab View (Lists) -->
-    <LeftSidebar class="flex flex-grow" v-if="!isMobilePlayerOpen" />
+    <LeftSidebar class="flex flex-grow" v-show="!isMobilePlayerOpen" />
     
-    <!-- Fullscreen Player Modal -->
-    <div v-if="isMobilePlayerOpen" class="fixed inset-0 z-40 p-2 flex flex-col bg-[var(--color-near-black)] rounded-[8px] overflow-hidden shadow-[var(--shadow-spotify-heavy)]">
+    <!-- Player View -->
+    <div v-show="isMobilePlayerOpen" class="flex-grow flex flex-col bg-[var(--color-near-black)] rounded-[8px] overflow-hidden shadow-[var(--shadow-spotify-heavy)] z-20 relative">
       <!-- Mobile Header for Player -->
       <div class="flex items-center justify-between p-4 bg-[var(--color-dark-surface)] flex-shrink-0 z-20">
-        <button @click="isMobilePlayerOpen = false" class="p-2 text-[var(--color-text-silver)] hover:text-white">
+        <button @click="isMobilePlayerOpen = false" class="p-2 text-[var(--color-text-silver)] hover:text-[var(--color-text-white)] transition-colors">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
         </button>
         <span class="text-xs font-bold tracking-widest text-[var(--color-text-white)] uppercase">{{ t('app.nowPlaying') }}</span>
@@ -50,9 +55,9 @@ const handlePlayPause = () => {
     </transition>
     
     <!-- Floating Mini Player -->
-    <div v-if="!isMobilePlayerOpen && currentUrl" class="fixed bottom-16 left-2 right-2 bg-[var(--color-mid-dark)] rounded-[6px] p-2 flex items-center shadow-lg border border-[var(--color-border-gray)] z-30" @click="isMobilePlayerOpen = true">
+    <div v-show="!isMobilePlayerOpen && currentUrl" class="absolute bottom-[72px] left-2 right-2 bg-[var(--color-mid-dark)] rounded-[6px] p-2 flex items-center shadow-lg border border-[var(--color-border-gray)] z-30" @click="isMobilePlayerOpen = true">
       <div class="w-10 h-10 bg-[var(--color-dark-surface)] rounded flex items-center justify-center mr-3 flex-shrink-0">
-         <span class="w-2 h-2 rounded-full bg-[var(--color-spotify-green)] animate-pulse"></span>
+         <span class="w-2 h-2 rounded-full bg-[var(--color-spotify-green)]" :class="{'animate-pulse': isPlaying}"></span>
       </div>
       <div class="flex-grow min-w-0 mr-2">
         <div class="text-sm font-bold text-white truncate">{{ currentSong?.name || t('app.nowPlaying') }}</div>
@@ -60,22 +65,23 @@ const handlePlayPause = () => {
       </div>
       <div class="flex items-center space-x-2" @click.stop>
         <button @click="handlePlayPause" class="p-2 text-white">
-          <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          <svg v-if="isPlaying" class="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          <svg v-else class="w-6 h-6 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
         </button>
       </div>
     </div>
 
     <!-- Bottom Navigation Bar -->
-    <div v-if="!isMobilePlayerOpen" class="flex h-14 bg-[var(--color-dark-surface)] rounded-[8px] flex-shrink-0 items-center justify-around px-2 z-30 shadow-[var(--shadow-spotify-heavy)] border-t border-[var(--color-border-gray)] relative">
-       <button v-if="!isStandalone" @click="activeTab = 'room'" :class="activeTab === 'room' ? 'text-white' : 'text-[var(--color-text-silver)]'" class="flex flex-col items-center justify-center w-16 transition-colors">
+    <div class="flex h-14 bg-[var(--color-dark-surface)] rounded-[8px] flex-shrink-0 items-center justify-around px-2 z-30 shadow-[var(--shadow-spotify-heavy)] border-t border-[var(--color-border-gray)] relative">
+       <button v-if="!isStandalone" @click="switchTab('room')" :class="activeTab === 'room' && !isMobilePlayerOpen ? 'text-white' : 'text-[var(--color-text-silver)]'" class="flex flex-col items-center justify-center w-16 transition-colors">
          <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
          <span class="text-[10px] font-semibold">{{ t('app.roomPlaylist') }}</span>
        </button>
-       <button @click="activeTab = 'search'" :class="activeTab === 'search' ? 'text-white' : 'text-[var(--color-text-silver)]'" class="flex flex-col items-center justify-center w-16 transition-colors">
+       <button @click="switchTab('search')" :class="activeTab === 'search' && !isMobilePlayerOpen ? 'text-white' : 'text-[var(--color-text-silver)]'" class="flex flex-col items-center justify-center w-16 transition-colors">
          <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
          <span class="text-[10px] font-semibold">{{ t('app.search') }}</span>
        </button>
-       <button @click="activeTab = 'playlist'" :class="activeTab === 'playlist' ? 'text-white' : 'text-[var(--color-text-silver)]'" class="flex flex-col items-center justify-center w-16 transition-colors">
+       <button @click="switchTab('playlist')" :class="activeTab === 'playlist' && !isMobilePlayerOpen ? 'text-white' : 'text-[var(--color-text-silver)]'" class="flex flex-col items-center justify-center w-16 transition-colors">
          <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7" /></svg>
          <span class="text-[10px] font-semibold">{{ t('app.playlist') }}</span>
        </button>

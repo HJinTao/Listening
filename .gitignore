@@ -9,8 +9,6 @@ lerna-debug.log*
 
 # Dependencies
 node_modules/
-backend/node_modules/
-frontend/node_modules/
 jspm_packages/
 web_modules/
 
@@ -19,24 +17,42 @@ web_modules/
 
 # Build Output
 dist/
+dist-ssr/
 build/
-backend/dist/
-frontend/dist/
+coverage/
+.nyc_output/
+backend/public/
 
 # Optional npm cache directory
 .npm
 
 # dotenv environment variables file
 .env
-.env.test
-.env.production
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
-# Mac OS
+# Vite specific
+.vite/
+
+# Database (better-sqlite3)
+*.sqlite
+*.sqlite3
+*.db
+*.db3
+*.sqlite-shm
+*.sqlite-wal
+database.sqlite
+
+# OS Files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # IDEs and Editors
 .idea/
@@ -52,21 +68,14 @@ frontend/dist/
 *.sw?
 *.sublime-workspace
 *.sublime-project
+.trae/
 
 # Project specific archives
 *.tgz
 *.tar.gz
 backend/public.tar.gz
 
-# Coverage directory
-coverage
-.nyc_output
-
-# Vite specific
-.vite
-database.sqlite
-
+# Local documentation & notes
 DESIGN.md
 PROJECT_ISSUES.md
 TODO.md
-.trae/*
