@@ -24,7 +24,7 @@ watch(currentLyricIndex, (newIndex) => {
 </script>
 
 <template>
-  <section class="flex-grow flex flex-col relative bg-[var(--color-near-black)] rounded-[8px] overflow-hidden shadow-[var(--shadow-spotify-heavy)]">
+  <section class="flex-grow flex flex-col relative bg-[var(--color-near-black)] rounded-[8px] overflow-hidden shadow-[var(--shadow-spotify-heavy)] min-h-0">
     <!-- Top: Track Info -->
     <div class="px-4 md:px-8 pt-4 md:pt-8 pb-4 md:pb-6 flex-shrink-0 z-10 bg-gradient-to-b from-[var(--color-dark-surface)] to-[var(--color-near-black)]">
       <div class="flex flex-col justify-between gap-4 h-full">

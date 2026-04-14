@@ -29,13 +29,13 @@ const switchTab = (tab: string) => {
 </script>
 
 <template>
-  <main class="flex-grow flex flex-col overflow-hidden bg-[var(--color-near-black)] p-2 gap-2 relative">
+  <main class="flex-grow flex flex-col overflow-hidden bg-[var(--color-near-black)] p-2 gap-2 relative min-h-0">
     
     <!-- Active Tab View (Lists) -->
-    <LeftSidebar class="flex flex-grow" v-show="!isMobilePlayerOpen" />
+    <LeftSidebar class="flex flex-grow min-h-0" v-show="!isMobilePlayerOpen" />
     
     <!-- Player View -->
-    <div v-show="isMobilePlayerOpen" class="flex-grow flex flex-col bg-[var(--color-near-black)] rounded-[8px] overflow-hidden shadow-[var(--shadow-spotify-heavy)] z-20 relative">
+    <div v-show="isMobilePlayerOpen" class="flex-grow flex flex-col bg-[var(--color-near-black)] rounded-[8px] overflow-hidden shadow-[var(--shadow-spotify-heavy)] z-20 relative min-h-0">
       <!-- Mobile Header for Player -->
       <div class="flex items-center justify-between p-4 bg-[var(--color-dark-surface)] flex-shrink-0 z-20">
         <button @click="isMobilePlayerOpen = false" class="p-2 text-[var(--color-text-silver)] hover:text-[var(--color-text-white)] transition-colors">
@@ -44,7 +44,7 @@ const switchTab = (tab: string) => {
         <span class="text-xs font-bold tracking-widest text-[var(--color-text-white)] uppercase">{{ t('app.nowPlaying') }}</span>
         <div class="w-10"></div> <!-- Spacer -->
       </div>
-      <PlayerStage class="bg-[var(--color-near-black)]" />
+      <PlayerStage class="bg-[var(--color-near-black)] min-h-0" />
       <PlayerControls ref="playerControlsRef" />
     </div>
 

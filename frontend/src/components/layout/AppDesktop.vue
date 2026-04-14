@@ -6,13 +6,13 @@ import PlayerControls from '../player/PlayerControls.vue';
 </script>
 
 <template>
-  <main class="flex-grow flex flex-row overflow-hidden bg-[var(--color-near-black)] p-2 gap-2 relative">
+  <main class="flex-grow flex flex-row overflow-hidden bg-[var(--color-near-black)] p-2 gap-2 relative min-h-0">
     <!-- Left Sidebar (Lists) -->
     <LeftSidebar class="flex" />
     
     <!-- Center Player -->
-    <div class="flex flex-grow flex-col relative rounded-[8px] overflow-hidden shadow-[var(--shadow-spotify-heavy)]">
-      <PlayerStage class="bg-[var(--color-near-black)]" />
+    <div class="flex flex-grow flex-col relative rounded-[8px] overflow-hidden shadow-[var(--shadow-spotify-heavy)] min-h-0 min-w-0">
+      <PlayerStage class="bg-[var(--color-near-black)] min-h-0" />
       <PlayerControls />
     </div>
 

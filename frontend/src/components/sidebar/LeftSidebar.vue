@@ -16,7 +16,7 @@ const { playSong, getTrackId } = usePlayer();
 </script>
 
 <template>
-  <aside class="w-full md:w-[350px] flex-shrink-0 flex flex-col bg-[var(--color-near-black)] rounded-[8px] z-20 relative overflow-hidden">
+  <aside class="w-full md:w-[350px] shrink md:shrink-0 min-h-0 flex flex-col bg-[var(--color-near-black)] rounded-[8px] z-20 relative overflow-hidden">
     
     <!-- Tabs -->
     <div class="hidden md:flex space-x-2 p-4 bg-[var(--color-near-black)]">
@@ -31,7 +31,7 @@ const { playSong, getTrackId } = usePlayer();
       </button>
     </div>
 
-    <div class="flex-grow flex flex-col bg-[var(--color-near-black)] rounded-[8px] overflow-hidden mx-2 mb-2">
+    <div class="flex-grow flex flex-col bg-[var(--color-near-black)] rounded-[8px] overflow-hidden mx-2 mb-2 min-h-0">
       <div v-if="activeTab === 'search'" class="p-4 flex flex-col space-y-4">
         <div class="flex items-center justify-between">
           <span class="text-sm font-bold text-[var(--color-text-white)]">{{ t('app.audioDb') }}</span>
