@@ -1,10 +1,30 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
-import { activeVote } from '../../store/state';
+import { ref, watch, onUnmounted } from 'vue';
+import { activeVote, getSyncedTime } from '../../store/state';
 import { useRoom } from '../../composables/useRoom';
 
 const { t } = useI18n();
 const { voteYes, voteNo } = useRoom();
+
+const timeLeft = ref(0);
+let timer: any = null;
+
+watch(() => activeVote.value, (newVote) => {
+  if (timer) clearInterval(timer);
+  if (newVote && newVote.expiresAt && !newVote.result) {
+    const updateTime = () => {
+      const remaining = Math.max(0, Math.ceil((newVote.expiresAt - getSyncedTime()) / 1000));
+      timeLeft.value = remaining;
+    };
+    updateTime();
+    timer = setInterval(updateTime, 1000);
+  }
+}, { immediate: true });
+
+onUnmounted(() => {
+  if (timer) clearInterval(timer);
+});
 </script>
 
 <template>
@@ -12,6 +32,7 @@ const { voteYes, voteNo } = useRoom();
     <div v-if="activeVote" class="fixed top-24 left-1/2 transform -translate-x-1/2 bg-[var(--color-dark-surface)] border border-[var(--color-border-gray)] rounded-[8px] p-4 shadow-[var(--shadow-spotify-heavy)] z-[100] flex flex-col items-center space-y-3 min-w-[300px]">
       <div class="text-sm font-bold text-[var(--color-text-white)]">
         {{ activeVote.initiatorName }}{{ t('app.initiatedVote') }}
+        <span v-if="activeVote.expiresAt && !activeVote.result" class="text-xs font-mono text-[var(--color-spotify-green)] ml-2">({{ timeLeft }}s)</span>
       </div>
       <div class="text-xs text-[var(--color-text-silver)] font-semibold">
         {{ activeVote.type === 'SKIP_SONG' ? t('app.voteTypeSkip') : (activeVote.type === 'CHANGE_HOST' ? `${t('app.voteTypeChangeHost')}${activeVote.targetName}` : `${t('app.voteTypeKick')}${activeVote.targetName}`) }}

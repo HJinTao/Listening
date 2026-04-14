@@ -36,7 +36,8 @@ export const registerVoteHandlers = (io: Server, socket: Socket) => {
       targetId,
       voters: new Set([socket.id]),
       rejecters: new Set(),
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 30000 // 30 seconds timeout
     };
 
     roomStore.addVote(voteId, vote);
@@ -57,8 +58,18 @@ export const registerVoteHandlers = (io: Server, socket: Socket) => {
       targetId,
       yesCount: 1,
       noCount: 0,
-      required: requiredVotes
+      required: requiredVotes,
+      expiresAt: vote.expiresAt
     });
+
+    // Set timeout to automatically fail the vote if not passed in time
+    setTimeout(() => {
+      const v = roomStore.getVote(voteId);
+      if (v) {
+        io.to(String(v.roomId)).emit('vote-ended', { id: voteId, result: 'failed' });
+        roomStore.deleteVote(voteId);
+      }
+    }, 30000);
 
     checkVote(io, voteId);
   });

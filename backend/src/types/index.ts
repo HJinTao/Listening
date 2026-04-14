@@ -36,6 +36,7 @@ export interface Vote {
   voters: Set<string>;
   rejecters: Set<string>;
   createdAt: number;
+  expiresAt?: number;
 }
 
 export type RoomMode = 'dictator' | 'democracy';
