@@ -37,9 +37,7 @@ const toggleLanguage = () => {
 <template>
   <header class="h-16 flex items-center justify-between px-6 bg-[var(--color-near-black)] z-50 flex-shrink-0">
     <div class="flex items-center space-x-3">
-      <div class="w-8 h-8 bg-[var(--color-spotify-green)] rounded-full flex items-center justify-center">
-        <svg class="w-4 h-4 text-[var(--color-near-black)]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
-      </div>
+      <img src="/icon.png" alt="ListenSync Logo" class="w-8 h-8 object-contain" />
       <h1 class="font-spotify-title font-bold text-2xl tracking-tight">{{ t('app.title') }}</h1>
     </div>
     
