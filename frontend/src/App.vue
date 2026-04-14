@@ -323,7 +323,14 @@ const kickUser = (targetUserId: string) => {
 
 const voteYes = () => {
   if (socket.value && activeVote.value) {
-    socket.value.emit('vote', { voteId: activeVote.value.id });
+    socket.value.emit('vote', { voteId: activeVote.value.id, isYes: true });
+    activeVote.value.hasVoted = true;
+  }
+};
+
+const voteNo = () => {
+  if (socket.value && activeVote.value) {
+    socket.value.emit('vote', { voteId: activeVote.value.id, isYes: false });
     activeVote.value.hasVoted = true;
   }
 };
@@ -405,9 +412,7 @@ const connectSocket = () => {
   socket.value.on('chat-message', (data) => {
     const translatedMessage = data.isSystem ? getTranslatedMessage(data.message) : data.message;
     chatMessages.value.push({ ...data, message: translatedMessage });
-    if (translatedMessage && (translatedMessage.includes(t('app.systemChat.votePassedSkip')) || translatedMessage.includes(t('app.systemChat.votePassedHost').split('{')[0]) || translatedMessage.includes(t('app.systemChat.votePassedKick').split('{')[0]) || translatedMessage.includes(t('app.systemChat.roomModeChanged').split('{')[0]))) {
-      activeVote.value = null;
-    }
+    
     // Auto scroll chat
     setTimeout(() => {
       const el = document.getElementById('chat-scroll');
@@ -445,12 +450,23 @@ const connectSocket = () => {
   socket.value.on('vote-progress', (data) => {
     if (activeVote.value && activeVote.value.id === data.id) {
       activeVote.value.yesCount = data.yesCount;
+      activeVote.value.noCount = data.noCount;
       activeVote.value.required = data.required;
     }
   });
 
+  socket.value.on('vote-ended', (data) => {
+    if (activeVote.value && activeVote.value.id === data.id) {
+      activeVote.value.result = data.result;
+      setTimeout(() => {
+        if (activeVote.value && activeVote.value.id === data.id) {
+          activeVote.value = null;
+        }
+      }, 3000);
+    }
+  });
+
   socket.value.on('execute-skip-song', () => {
-    activeVote.value = null;
     if (isHost.value) {
       playNextSong(false);
     }
@@ -1067,19 +1083,37 @@ watch(isLoggedIn, (val) => {
         <div class="text-xs text-[var(--color-text-silver)] font-semibold">
           {{ activeVote.type === 'SKIP_SONG' ? t('app.voteTypeSkip') : (activeVote.type === 'CHANGE_HOST' ? `${t('app.voteTypeChangeHost')}${activeVote.targetName}` : `${t('app.voteTypeKick')}${activeVote.targetName}`) }}
         </div>
-        <div class="w-full bg-[var(--color-near-black)] h-2 rounded-full overflow-hidden">
-          <div class="h-full bg-[var(--color-spotify-green)] transition-all" :style="{ width: `${(activeVote.yesCount / activeVote.required) * 100}%` }"></div>
-        </div>
-        <div class="flex items-center justify-between w-full text-xs font-mono text-[var(--color-text-silver)]">
-          <span>{{ t('app.agreedCount') }}{{ activeVote.yesCount }}</span>
-          <span>{{ t('app.requiredCount') }}{{ activeVote.required }}</span>
-        </div>
-        <button v-if="!activeVote.hasVoted" @click="voteYes" class="w-full bg-[var(--color-spotify-green)] text-[var(--color-near-black)] py-1.5 rounded-[500px] font-bold text-xs hover:scale-105 transition-transform uppercase">
-          {{ t('app.agree') }}
+        
+        <template v-if="!activeVote.result">
+          <div class="w-full bg-[var(--color-near-black)] h-2 rounded-full overflow-hidden flex">
+            <div class="h-full bg-[var(--color-spotify-green)] transition-all" :style="{ width: `${(activeVote.yesCount / activeVote.required) * 100}%` }"></div>
+          </div>
+          <div class="flex items-center justify-between w-full text-xs font-mono text-[var(--color-text-silver)]">
+            <span>{{ t('app.agreedCount') }}{{ activeVote.yesCount }} / {{ activeVote.required }}</span>
+            <span>{{ t('app.rejectedCount') }}{{ activeVote.noCount }}</span>
+          </div>
+          <div v-if="!activeVote.hasVoted" class="flex space-x-2 w-full">
+            <button @click="voteYes" class="flex-1 bg-[var(--color-spotify-green)] text-[var(--color-near-black)] py-1.5 rounded-[500px] font-bold text-xs hover:scale-105 transition-transform uppercase">
+              {{ t('app.agree') }}
+            </button>
+            <button @click="voteNo" class="flex-1 bg-red-500 text-white py-1.5 rounded-[500px] font-bold text-xs hover:scale-105 transition-transform uppercase">
+              {{ t('app.reject') }}
+            </button>
+          </div>
+          <div v-else class="w-full text-center text-xs text-[var(--color-text-silver)] py-1.5 font-bold uppercase">
+            {{ t('app.voted') }}
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="w-full text-center text-sm font-bold py-2 uppercase" :class="activeVote.result === 'passed' ? 'text-[var(--color-spotify-green)]' : 'text-red-500'">
+            {{ activeVote.result === 'passed' ? t('app.votePassed') : t('app.voteFailed') }}
+          </div>
+        </template>
+
+        <button v-if="!activeVote.result" @click="activeVote = null" class="w-full bg-[var(--color-mid-dark)] text-[var(--color-text-white)] py-1.5 rounded-[500px] font-bold text-xs hover:scale-105 transition-transform uppercase mt-2">
+          {{ t('app.close') }}
         </button>
-        <div v-else class="w-full text-center text-xs text-[var(--color-text-silver)] py-1.5 font-bold uppercase">
-          {{ t('app.agreed') }}
-        </div>
       </div>
     </transition>
 
@@ -1393,9 +1427,14 @@ watch(isLoggedIn, (val) => {
                     <button v-else @click="revokeControl(u.id)" class="text-xs bg-orange-500 text-white px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.revokeControlTitle')">-C</button>
                     <button @click="kickUser(u.id)" class="text-xs bg-red-500 text-white px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.kickUserTitle')">K</button>
                   </template>
-                  <template v-else-if="roomMode === 'democracy' && u.id !== socket?.id">
-                    <button v-if="u.isHost" @click="initiateVote('CHANGE_HOST', u.id)" class="text-xs bg-[var(--color-spotify-green)] text-[var(--color-near-black)] px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.voteHostTitle')">V:H</button>
-                    <button v-else @click="initiateVote('KICK_USER', u.id)" class="text-xs bg-red-500 text-white px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.voteKickTitle')">V:K</button>
+                  <template v-else-if="roomMode === 'democracy'">
+                    <template v-if="u.id !== socket?.id">
+                      <button v-if="!u.isHost" @click="initiateVote('CHANGE_HOST', u.id)" class="text-xs bg-[var(--color-spotify-green)] text-[var(--color-near-black)] px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.voteHostTitle')">V:H</button>
+                      <button @click="initiateVote('KICK_USER', u.id)" class="text-xs bg-red-500 text-white px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform" :title="t('app.voteKickTitle')">V:K</button>
+                    </template>
+                    <template v-else>
+                      <button v-if="!u.isHost" @click="initiateVote('CHANGE_HOST', u.id)" class="text-xs bg-[var(--color-spotify-green)] text-[var(--color-near-black)] px-2 py-0.5 rounded-[500px] font-bold hover:scale-105 transition-transform ml-2" :title="t('app.voteHostTitle')">V:H</button>
+                    </template>
                   </template>
                   <span v-if="u.canControl && u.id !== socket?.id && !isHost" class="text-xs text-[var(--color-text-silver)] font-bold px-2 py-0.5 border border-[var(--color-text-silver)] rounded-[500px]">C</span>
                 </div>

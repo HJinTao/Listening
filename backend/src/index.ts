@@ -333,6 +333,7 @@ interface Vote {
   initiatorId: string;
   targetId?: string;
   voters: Set<string>;
+  rejecters: Set<string>;
   createdAt: number;
 }
 const activeVotes = new Map<string, Vote>();
@@ -526,6 +527,17 @@ io.on('connection', (socket) => {
     const user = users.get(socket.id);
     if (user && user.isHost && user.roomId === numRoomId) {
       roomModes.set(numRoomId, mode);
+      
+      // Cancel active votes if switching to dictator
+      if (mode === 'dictator') {
+        for (const [vId, v] of activeVotes.entries()) {
+          if (v.roomId === numRoomId) {
+            activeVotes.delete(vId);
+            io.to(String(numRoomId)).emit('vote-ended', { id: vId, result: 'failed' });
+          }
+        }
+      }
+
       io.to(String(numRoomId)).emit('room-info', {
         users: Array.from(users.values()).filter(u => u.roomId === numRoomId),
         playlist: roomPlaylists.get(numRoomId),
@@ -614,6 +626,22 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'CHANGE_HOST' && targetId) {
+      const targetUser = users.get(targetId);
+      if (targetUser && targetUser.isHost) {
+        // Prevent voting to make the current host the host again
+        return;
+      }
+    }
+
+    // Cancel any existing active votes in the room
+    for (const [vId, v] of activeVotes.entries()) {
+      if (v.roomId === numRoomId) {
+        activeVotes.delete(vId);
+        io.to(String(numRoomId)).emit('vote-ended', { id: vId, result: 'failed' });
+      }
+    }
+
     const voteId = `${numRoomId}_${type}_${targetId || ''}_${Date.now()}`;
     const vote: Vote = {
       id: voteId,
@@ -622,6 +650,7 @@ io.on('connection', (socket) => {
       initiatorId: socket.id,
       targetId,
       voters: new Set([socket.id]),
+      rejecters: new Set(),
       createdAt: Date.now()
     };
 
@@ -642,20 +671,27 @@ io.on('connection', (socket) => {
       targetName,
       targetId,
       yesCount: 1,
+      noCount: 0,
       required: requiredVotes
     });
 
     checkVote(voteId);
   });
 
-  socket.on('vote', ({ voteId }) => {
+  socket.on('vote', ({ voteId, isYes }) => {
     const user = users.get(socket.id);
     if (!user) return;
 
     const vote = activeVotes.get(voteId);
     if (!vote || vote.roomId !== user.roomId) return;
 
-    vote.voters.add(socket.id);
+    if (isYes) {
+      vote.voters.add(socket.id);
+      vote.rejecters.delete(socket.id);
+    } else {
+      vote.rejecters.add(socket.id);
+      vote.voters.delete(socket.id);
+    }
     checkVote(voteId);
   });
 
@@ -665,14 +701,20 @@ io.on('connection', (socket) => {
 
     const roomUsers = Array.from(users.values()).filter(u => u.roomId === vote.roomId);
     const requiredVotes = Math.floor(roomUsers.length / 2) + 1;
+    const requiredRejects = Math.ceil(roomUsers.length / 2);
 
     if (vote.voters.size >= requiredVotes) {
       executeVote(vote);
+      io.to(String(vote.roomId)).emit('vote-ended', { id: voteId, result: 'passed' });
+      activeVotes.delete(voteId);
+    } else if (vote.rejecters.size >= requiredRejects || (vote.voters.size + vote.rejecters.size === roomUsers.length)) {
+      io.to(String(vote.roomId)).emit('vote-ended', { id: voteId, result: 'failed' });
       activeVotes.delete(voteId);
     } else {
       io.to(String(vote.roomId)).emit('vote-progress', {
         id: voteId,
         yesCount: vote.voters.size,
+        noCount: vote.rejecters.size,
         required: requiredVotes
       });
     }
@@ -775,9 +817,24 @@ io.on('connection', (socket) => {
           users: remainingUsers,
           roomMode: roomModes.get(roomId) || 'dictator',
         });
+
+        // Remove the disconnected user from any active votes
+        for (const [voteId, vote] of activeVotes.entries()) {
+          if (vote.roomId === roomId) {
+            vote.voters.delete(socket.id);
+            vote.rejecters.delete(socket.id);
+            checkVote(voteId);
+          }
+        }
       } else {
         // cleanup room mode
         roomModes.delete(roomId);
+        // cleanup active votes
+        for (const [voteId, vote] of activeVotes.entries()) {
+          if (vote.roomId === roomId) {
+            activeVotes.delete(voteId);
+          }
+        }
       }
     }
     console.log(`User disconnected: ${socket.id}`);
