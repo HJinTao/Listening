@@ -58,7 +58,13 @@ export function usePlayer() {
   const applyDriftCorrection = (targetTime: number, playing: boolean) => {
     if (!audioRef.value) return;
     const audio = audioRef.value;
+    
+    // Do not apply drift correction if the audio is actively buffering
+    if (audio.readyState > 0 && audio.readyState < 3) return;
+    
     const diff = targetTime - audio.currentTime;
+
+    const isMobileBrowser = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
     if (playing) {
       if (Math.abs(diff) > 1.5) {
@@ -66,6 +72,16 @@ export function usePlayer() {
         audio.currentTime = targetTime;
         return;
       }
+      
+      if (isMobileBrowser) {
+        ensurePlaybackRate(1);
+        // Only jump if the drift is large enough to be noticeable, to avoid constant stuttering
+        if (Math.abs(diff) > 1.0) {
+          audio.currentTime = targetTime;
+        }
+        return;
+      }
+
       if (Math.abs(diff) > 0.05) {
         const rate = clamp(1 + diff * 0.4, 0.85, 1.15);
         ensurePlaybackRate(rate);
