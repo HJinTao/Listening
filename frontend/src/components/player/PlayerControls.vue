@@ -22,6 +22,10 @@ const setAudioRef = (el: any) => {
   audioRef.value = el;
 };
 
+defineExpose({
+  togglePlayPause
+});
+
 watch(volume, (val) => {
   if (audioRef.value) {
     audioRef.value.volume = val;
@@ -46,7 +50,7 @@ watch(volume, (val) => {
     </audio>
 
     <!-- Left: Empty or Mini Info -->
-    <div class="flex-1 min-w-0"></div>
+    <div class="hidden md:block flex-1 min-w-0"></div>
 
     <!-- Center: Playback Controls & Progress Bar -->
     <div class="flex flex-col items-center justify-center flex-1 max-w-2xl w-full">
@@ -92,7 +96,7 @@ watch(volume, (val) => {
     </div>
 
     <!-- Right: Volume Control -->
-    <div class="flex-1 flex justify-end items-center space-x-3">
+    <div class="hidden md:flex flex-1 justify-end items-center space-x-3">
       <svg class="w-4 h-4 text-[var(--color-text-silver)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5 10h4l5-5v14l-5-5H5a2 2 0 01-2-2v-4a2 2 0 012-2z" />
       </svg>

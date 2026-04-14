@@ -10,7 +10,7 @@ const { passHost, grantControl, revokeControl, initiateVote, kickUser, sendChat 
 </script>
 
 <template>
-  <aside v-if="!isStandalone" class="w-[300px] flex-shrink-0 flex flex-col bg-[var(--color-near-black)] rounded-[8px] z-20 hidden lg:flex overflow-hidden">
+  <aside v-if="!isStandalone" class="w-[300px] flex-shrink-0 flex flex-col bg-[var(--color-near-black)] rounded-[8px] z-20 overflow-hidden">
     <!-- Active Nodes -->
     <div class="h-1/3 flex flex-col bg-[var(--color-dark-surface)] mb-2 rounded-[8px]">
       <div class="p-4">

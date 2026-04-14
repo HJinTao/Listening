@@ -26,7 +26,7 @@ watch(currentLyricIndex, (newIndex) => {
 <template>
   <section class="flex-grow flex flex-col relative bg-[var(--color-near-black)] rounded-[8px] overflow-hidden shadow-[var(--shadow-spotify-heavy)]">
     <!-- Top: Track Info -->
-    <div class="px-8 pt-8 pb-6 flex-shrink-0 z-10 bg-gradient-to-b from-[var(--color-dark-surface)] to-[var(--color-near-black)]">
+    <div class="px-4 md:px-8 pt-4 md:pt-8 pb-4 md:pb-6 flex-shrink-0 z-10 bg-gradient-to-b from-[var(--color-dark-surface)] to-[var(--color-near-black)]">
       <div class="flex flex-col justify-between gap-4 h-full">
         <div class="max-w-full">
           <div class="text-sm font-bold text-[var(--color-text-white)] uppercase tracking-[1.4px] mb-4 flex items-center">

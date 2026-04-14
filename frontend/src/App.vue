@@ -3,23 +3,23 @@ import { onMounted, onUnmounted, watch } from 'vue';
 import axios from 'axios';
 import { 
   backendUrl, lxEngine, scriptLoaded, isLoggedIn, 
-  isJoined, isHost, currentUrl, socket, audioRef, isStandalone 
+  isJoined, isHost, currentUrl, socket, audioRef, isStandalone
 } from './store/state';
 import { LxEngine } from './utils/lx-engine';
 import { usePlaylist } from './composables/usePlaylist';
 import { usePlayer } from './composables/usePlayer';
+import { useDevice } from './composables/useDevice';
 
 import AppHeader from './components/layout/AppHeader.vue';
+import AppDesktop from './components/layout/AppDesktop.vue';
+import AppMobile from './components/layout/AppMobile.vue';
 import AuthPanel from './components/auth/AuthPanel.vue';
 import VoteToast from './components/common/VoteToast.vue';
 import ModeToast from './components/common/ModeToast.vue';
-import LeftSidebar from './components/sidebar/LeftSidebar.vue';
-import RightSidebar from './components/sidebar/RightSidebar.vue';
-import PlayerStage from './components/player/PlayerStage.vue';
-import PlayerControls from './components/player/PlayerControls.vue';
 
 const { fetchPlaylist } = usePlaylist();
 const { sendSyncCommand, ensurePlaybackRate, getTrackId } = usePlayer();
+const { isMobile } = useDevice();
 
 let hostHeartbeatTimer: number | null = null;
 
@@ -79,16 +79,8 @@ watch(isLoggedIn, (val) => {
     </transition>
 
     <transition name="fade">
-      <main v-if="isJoined || isStandalone" class="flex-grow flex overflow-hidden bg-[var(--color-near-black)] p-2 gap-2">
-        <LeftSidebar />
-        
-        <div class="flex-grow flex flex-col relative bg-[var(--color-near-black)] rounded-[8px] overflow-hidden shadow-[var(--shadow-spotify-heavy)]">
-          <PlayerStage />
-          <PlayerControls />
-        </div>
-
-        <RightSidebar />
-      </main>
+      <AppMobile v-if="(isJoined || isStandalone) && isMobile" />
+      <AppDesktop v-else-if="(isJoined || isStandalone) && !isMobile" />
     </transition>
   </div>
 </template>

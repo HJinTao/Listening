@@ -16,10 +16,10 @@ const { playSong, getTrackId } = usePlayer();
 </script>
 
 <template>
-  <aside class="w-[350px] flex-shrink-0 flex flex-col bg-[var(--color-near-black)] rounded-[8px] z-20 relative overflow-hidden">
+  <aside class="w-full md:w-[350px] flex-shrink-0 flex flex-col bg-[var(--color-near-black)] rounded-[8px] z-20 relative overflow-hidden">
     
     <!-- Tabs -->
-    <div class="flex space-x-2 p-4 bg-[var(--color-near-black)]">
+    <div class="hidden md:flex space-x-2 p-4 bg-[var(--color-near-black)]">
       <button v-if="!isStandalone" @click="activeTab = 'room'" :class="activeTab === 'room' ? 'bg-[var(--color-dark-surface)] text-[var(--color-text-white)]' : 'bg-transparent text-[var(--color-text-silver)] hover:text-[var(--color-text-white)]'" class="px-4 py-1.5 rounded-[9999px] text-sm font-semibold transition-colors">
         {{ t('app.roomPlaylist') }}
       </button>
@@ -61,7 +61,7 @@ const { playSong, getTrackId } = usePlayer();
           <div v-else-if="searchResults.length === 0" class="text-center py-10 text-sm text-[var(--color-text-silver)] font-semibold">
             {{ t('app.noResults') }}
           </div>
-          <div v-for="song in searchResults" :key="song.songmid" class="group flex items-center justify-between p-2 rounded-[6px] transition-all hover:bg-[var(--color-dark-surface)] cursor-pointer" @click="addToRoomPlaylist(song)">
+          <div v-for="song in searchResults" :key="song.songmid" class="group flex items-center justify-between p-2 rounded-[6px] transition-all hover:bg-[var(--color-dark-surface)] cursor-pointer" @click="isStandalone ? playSong(song, 'search') : addToRoomPlaylist(song)">
             <div class="flex items-center space-x-3 min-w-0">
               <div class="w-10 h-10 bg-[var(--color-dark-surface)] rounded-[4px] flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--color-mid-dark)] transition-colors">
                 <svg class="w-5 h-5 text-[var(--color-text-silver)] group-hover:text-[var(--color-text-white)] transition-colors" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -85,7 +85,7 @@ const { playSong, getTrackId } = usePlayer();
           <div v-if="playlist.length === 0" class="text-center py-10 text-sm text-[var(--color-text-silver)] font-semibold">
             {{ t('app.emptyPlaylist') }}
           </div>
-          <div v-for="song in playlist" :key="song.songmid" class="group flex items-center justify-between p-2 rounded-[6px] transition-all hover:bg-[var(--color-dark-surface)] cursor-pointer" @click="addToRoomPlaylist(song)">
+          <div v-for="song in playlist" :key="song.songmid" class="group flex items-center justify-between p-2 rounded-[6px] transition-all hover:bg-[var(--color-dark-surface)] cursor-pointer" @click="isStandalone ? playSong(song, 'playlist') : addToRoomPlaylist(song)">
             <div class="flex items-center space-x-3 min-w-0">
               <div class="w-10 h-10 bg-[var(--color-dark-surface)] rounded-[4px] flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--color-mid-dark)] transition-colors">
                 <svg class="w-5 h-5 text-[var(--color-text-silver)] group-hover:text-[var(--color-text-white)] transition-colors" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>

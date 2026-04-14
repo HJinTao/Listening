@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { 
   isJoined, isStandalone, isHost, roomMode, 
@@ -10,6 +11,22 @@ import { useRoom } from '../../composables/useRoom';
 const { t, locale } = useI18n();
 const { handleLogout } = useAuth();
 const { changeRoomMode } = useRoom();
+
+const isMobileModeMenuOpen = ref(false);
+
+const handleClickOutside = () => {
+  if (isMobileModeMenuOpen.value) {
+    isMobileModeMenuOpen.value = false;
+  }
+};
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside);
+});
 
 const toggleLanguage = () => {
   locale.value = locale.value === 'en' ? 'zh' : 'en';
@@ -28,21 +45,21 @@ const toggleLanguage = () => {
     
     <div class="flex items-center space-x-6">
       <div v-if="isJoined" class="flex items-center space-x-4">
-        <div class="flex items-center space-x-2 bg-[var(--color-mid-dark)] px-4 py-1.5 rounded-[500px]">
+        <div class="hidden md:flex items-center space-x-2 bg-[var(--color-mid-dark)] px-4 py-1.5 rounded-[500px]">
           <span class="w-2 h-2 rounded-full bg-[var(--color-spotify-green)]" :class="{'animate-pulse': isPlaying}"></span>
           <span class="text-xs text-[var(--color-text-silver)] font-semibold">{{ t('app.freq') }}: {{ roomId }}</span>
         </div>
-        <div class="text-xs text-[var(--color-text-white)] px-4 py-1.5 bg-[var(--color-mid-dark)] rounded-[500px] font-semibold">
+        <div class="hidden md:block text-xs text-[var(--color-text-white)] px-4 py-1.5 bg-[var(--color-mid-dark)] rounded-[500px] font-semibold">
           {{ t('app.op') }}: {{ username }}
         </div>
         <!-- Mode Tag -->
-        <div class="relative group cursor-pointer">
+        <div class="relative group cursor-pointer" @click.stop="isMobileModeMenuOpen = !isMobileModeMenuOpen">
           <div class="text-xs px-4 py-1.5 rounded-[500px] font-semibold flex items-center space-x-1 transition-colors" :class="roomMode === 'dictator' ? 'bg-red-900/50 text-red-200 border border-red-800' : 'bg-blue-900/50 text-blue-200 border border-blue-800'">
             <span>{{ roomMode === 'dictator' ? t('app.dictatorMode') : t('app.democracyMode') }}</span>
             <svg class="w-3 h-3 ml-1 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           </div>
-          <!-- Hover Permissions Card -->
-          <div class="absolute top-full right-0 pt-2 w-64 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+          <!-- Permissions Card (Hover for Desktop, Click for Mobile) -->
+          <div :class="{'opacity-100 visible': isMobileModeMenuOpen, 'opacity-0 invisible md:group-hover:opacity-100 md:group-hover:visible': !isMobileModeMenuOpen}" class="absolute top-full right-0 pt-2 w-64 transition-all z-50">
             <div class="p-4 bg-[var(--color-dark-surface)] border border-[var(--color-border-gray)] rounded-[8px] shadow-[var(--shadow-spotify-heavy)] pointer-events-auto">
                 <div class="text-sm font-bold text-[var(--color-text-white)] mb-2">{{ roomMode === 'dictator' ? t('app.dictatorMode') : t('app.democracyMode') }}</div>
                 <ul class="text-xs text-[var(--color-text-silver)] space-y-1">

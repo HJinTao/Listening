@@ -95,3 +95,5 @@ export const roomPlaylist = ref<any[]>([]);
 
 // UI
 export const activeTab = ref('room');
+export const isMobilePlayerOpen = ref(false);
+export const isMobileDrawerOpen = ref(false);
