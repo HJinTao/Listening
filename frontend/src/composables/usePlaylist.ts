@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { backendUrl, playlist, roomPlaylist, socket, roomId, isLoggedIn } from '../store/state';
 import { i18n } from '../i18n';
+import { populatePics } from '../utils/pic-cache';
 
 export function usePlaylist() {
   const t = i18n.global.t;
@@ -10,6 +11,7 @@ export function usePlaylist() {
     try {
       const resp = await axios.get(`${backendUrl}/api/playlist`);
       playlist.value = resp.data.list;
+      populatePics(playlist.value);
     } catch (error) {
       console.error('Failed to fetch playlist:', error);
     }

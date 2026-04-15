@@ -33,7 +33,8 @@ export class LxEngine {
           headers,
           body: data,
         }, {
-          timeout: typeof timeout === 'number' && timeout > 0 ? timeout : 60000
+          timeout: typeof timeout === 'number' && timeout > 0 ? timeout : 60000,
+          validateStatus: () => true
         }).then((response) => {
           const resp = {
             statusCode: response.data.statusCode,

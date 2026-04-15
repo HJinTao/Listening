@@ -11,6 +11,7 @@ import searchRouter from './routes/search';
 import lyricRouter from './routes/lyric';
 import proxyRouter from './routes/proxy';
 import musicUrlRouter from './routes/musicUrl';
+import picRouter from './routes/pic';
 
 import { setupSocket } from './socket';
 
@@ -27,15 +28,23 @@ app.use('/api/search', searchRouter);
 app.use('/api/lyric', lyricRouter);
 app.use('/api/proxy', proxyRouter);
 app.use('/api/url', musicUrlRouter);
+app.use('/api/pic', picRouter);
 
-// Serve built-in LXMUSIC script
-app.get('/api/script', (req, res) => {
-  const scriptPath = path.resolve(__dirname, '../LXMUSIC.js');
+// Serve built-in LXMUSIC scripts from the scripts directory
+app.get('/api/scripts', (req, res) => {
+  const scriptsDir = path.resolve(__dirname, '../scripts');
   try {
-    const content = fs.readFileSync(scriptPath, 'utf-8');
-    res.send(content);
+    if (!fs.existsSync(scriptsDir)) {
+      fs.mkdirSync(scriptsDir, { recursive: true });
+      return res.json([]);
+    }
+    const files = fs.readdirSync(scriptsDir).filter(f => f.endsWith('.js'));
+    const scripts = files.map(f => {
+      return fs.readFileSync(path.join(scriptsDir, f), 'utf-8');
+    });
+    res.json(scripts);
   } catch (error: any) {
-    res.status(500).send('Failed to read script: ' + error.message);
+    res.status(500).send('Failed to read scripts: ' + error.message);
   }
 });
 

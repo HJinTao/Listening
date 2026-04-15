@@ -2,7 +2,7 @@
 import { useI18n } from 'vue-i18n';
 import { 
   audioRef, currentUrl, hasControl, canSeek, isPlaying, currentTime, 
-  duration, volume, playMode 
+  duration, volume, playMode, currentSong
 } from '../../store/state';
 import { usePlayer } from '../../composables/usePlayer';
 import { watch } from 'vue';
@@ -49,8 +49,17 @@ watch(volume, (val) => {
       @ended="onEnded">
     </audio>
 
-    <!-- Left: Empty or Mini Info -->
-    <div class="hidden md:block flex-1 min-w-0"></div>
+    <!-- Left: Mini Track Info -->
+    <div class="hidden md:flex flex-1 min-w-0 items-center gap-3">
+      <div class="w-12 h-12 rounded-[6px] bg-[var(--color-dark-surface)] shrink-0 overflow-hidden flex items-center justify-center">
+        <img v-if="currentSong?.pic" :src="currentSong.pic" alt="cover" class="w-full h-full object-cover">
+        <svg v-else class="w-5 h-5 text-[var(--color-text-silver)]" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </div>
+      <div class="min-w-0">
+        <div class="text-sm font-semibold text-[var(--color-text-white)] truncate">{{ currentSong?.name || '-' }}</div>
+        <div class="text-xs text-[var(--color-text-silver)] truncate">{{ currentSong?.singer || '' }}</div>
+      </div>
+    </div>
 
     <!-- Center: Playback Controls & Progress Bar -->
     <div class="flex flex-col items-center justify-center flex-1 max-w-2xl w-full">

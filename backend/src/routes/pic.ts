@@ -4,8 +4,7 @@ import PluginManager from '../services/PluginManager';
 const router = Router();
 
 router.get('/', async (req, res) => {
-  const { source, songId, quality = '128k' } = req.query;
-
+  const { source, songId, albumId, hash } = req.query;
   if (!source || !songId) {
     return res.status(400).json({ error: 'Source and songId are required' });
   }
@@ -16,14 +15,15 @@ router.get('/', async (req, res) => {
       return res.status(404).json({ error: `Plugin for source ${source} not found` });
     }
 
-    const url = await plugin.getMusicUrl(String(songId), String(quality));
-    return res.json({ url });
+    const pic = await plugin.getPic(
+      String(songId),
+      albumId ? String(albumId) : '',
+      hash ? { hash: String(hash) } : undefined,
+    );
+    return res.json({ pic: pic || '' });
   } catch (error: any) {
-    console.error('Music URL error:', error.message);
-    if (error.message.includes('失效') || error.message.includes('失败')) {
-      return res.status(500).json({ error: error.message });
-    }
-    res.status(500).json({ error: error.message });
+    console.error('Pic error:', error.message);
+    return res.status(500).json({ error: error.message });
   }
 });
 

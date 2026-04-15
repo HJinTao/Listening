@@ -7,6 +7,7 @@ import {
 } from '../store/state';
 import { useAuth } from './useAuth';
 import { usePlayer } from './usePlayer';
+import { populatePics } from '../utils/pic-cache';
 
 let pingInterval: number | null = null;
 let modeToastTimer: number | null = null;
@@ -61,7 +62,10 @@ export function useSocket() {
 
     socket.value.on('room-info', (data) => {
       users.value = data.users;
-      if (data.playlist) roomPlaylist.value = data.playlist;
+      if (data.playlist) {
+        roomPlaylist.value = data.playlist;
+        populatePics(roomPlaylist.value);
+      }
       if (data.roomMode && data.roomMode !== roomMode.value) {
         roomMode.value = data.roomMode;
         modeToast.value = data.roomMode === 'dictator' ? t('app.switchedToDictator') : t('app.switchedToDemocracy');
@@ -84,6 +88,7 @@ export function useSocket() {
 
     socket.value.on('room-playlist', (data) => {
       roomPlaylist.value = data;
+      populatePics(roomPlaylist.value);
     });
 
     socket.value.on('chat-message', (data) => {

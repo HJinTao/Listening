@@ -53,9 +53,12 @@ watch(currentLyricIndex, (newIndex) => {
     <div class="flex-grow relative z-10 overflow-hidden mb-6">
       <div ref="lyricScrollRef" class="absolute inset-0 overflow-y-auto scroll-smooth custom-scrollbar px-8 md:px-12 py-[20%] lyric-mask">
         <div v-for="(line, index) in lyrics" :key="index" 
-             :class="['lyric-line text-left py-2 md:py-3 text-2xl md:text-4xl font-bold tracking-tight', { 'active': index === currentLyricIndex }]" 
+             :class="['lyric-line text-left py-2 md:py-3 tracking-tight', { 'active': index === currentLyricIndex }]" 
              :id="`lyric-${index}`">
-          {{ line.text }}
+          <div class="text-2xl md:text-4xl font-bold">{{ line.text }}</div>
+          <div v-if="line.tText" class="mt-1 text-lg md:text-2xl font-semibold text-[var(--color-text-silver)] opacity-85">
+            {{ line.tText }}
+          </div>
         </div>
         <div v-if="lyrics.length === 0" class="text-left py-10 text-2xl font-bold text-[var(--color-text-silver)] opacity-50">
           {{ t('app.noLyric') }}

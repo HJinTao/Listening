@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, watch } from 'vue';
 import axios from 'axios';
 import { 
-  backendUrl, lxEngine, scriptLoaded, isLoggedIn, 
+  backendUrl, lxEngines, scriptLoaded, isLoggedIn, 
   isJoined, isHost, currentUrl, socket, audioRef, isStandalone
 } from './store/state';
 import { LxEngine } from './utils/lx-engine';
@@ -25,14 +25,21 @@ let hostHeartbeatTimer: number | null = null;
 
 onMounted(async () => {
   try {
-    const resp = await axios.get(`${backendUrl}/api/script`);
-    lxEngine.value = new LxEngine(backendUrl);
-    const success = lxEngine.value.loadScript(resp.data);
-    if (success) {
+    const resp = await axios.get(`${backendUrl}/api/scripts`);
+    const engines = [];
+    for (const scriptContent of resp.data) {
+      const engine = new LxEngine(backendUrl);
+      const success = engine.loadScript(scriptContent);
+      if (success) {
+        engines.push(engine);
+      }
+    }
+    lxEngines.value = engines;
+    if (engines.length > 0) {
       scriptLoaded.value = true;
     }
   } catch (error) {
-    console.error('Failed to auto-load script:', error);
+    console.error('Failed to auto-load scripts:', error);
   }
 });
 

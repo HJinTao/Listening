@@ -64,7 +64,13 @@ const { playSong, getTrackId } = usePlayer();
           <div v-for="song in searchResults" :key="song.songmid" class="group flex items-center justify-between p-2 rounded-[6px] transition-all hover:bg-[var(--color-dark-surface)] cursor-pointer" @click="isStandalone ? playSong(song, 'search') : addToRoomPlaylist(song)">
             <div class="flex items-center space-x-3 min-w-0">
               <div class="w-10 h-10 bg-[var(--color-dark-surface)] rounded-[4px] flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--color-mid-dark)] transition-colors">
-                <svg class="w-5 h-5 text-[var(--color-text-silver)] group-hover:text-[var(--color-text-white)] transition-colors" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                <img
+                  v-if="song.pic"
+                  :src="song.pic"
+                  alt="cover"
+                  class="w-full h-full object-cover rounded-[4px]"
+                />
+                <svg v-else class="w-5 h-5 text-[var(--color-text-silver)] group-hover:text-[var(--color-text-white)] transition-colors" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
               </div>
               <div class="min-w-0">
                 <div class="text-base font-semibold truncate text-[var(--color-text-white)]">{{ song.name }}</div>

@@ -7,7 +7,7 @@ import {
   songQuality, isLoadingUrl, isChangingSong, lastAppliedSeq, 
   pendingAfterLoad, desiredPlaybackRate, socket, roomId, hasControl, 
   canSeek, getSyncedTime, users, hasPermission, roomMode,
-  hostUserId, roomPlaylist, searchResults, playlist, currentContext, lxEngine
+  hostUserId, roomPlaylist, searchResults, playlist, currentContext, lxEngines
 } from '../store/state';
 import { useRoom } from './useRoom';
 
@@ -254,7 +254,7 @@ export function usePlayer() {
     if (context) {
       currentContext.value = context;
     }
-    if (!lxEngine.value || !lxEngine.value.isInited) return;
+    if (lxEngines.value.length === 0) return;
     isLoadingUrl.value = true;
     isChangingSong.value = true;
     try {
@@ -264,7 +264,24 @@ export function usePlayer() {
         name: song.name,
         singer: song.singer 
       };
-      const response: any = await lxEngine.value.requestMusicUrl(song.source, musicInfo, songQuality.value);
+      
+      let response: any = null;
+      for (const engine of lxEngines.value) {
+        if (!engine.isInited) continue;
+        try {
+          response = await engine.requestMusicUrl(song.source, musicInfo, songQuality.value);
+          if (response) {
+            break;
+          }
+        } catch (err) {
+          console.warn('Engine failed to get URL, trying next...', err);
+        }
+      }
+      
+      if (!response) {
+        throw new Error('All engines failed to get music URL');
+      }
+      
       const isSameUrl = currentUrl.value === response;
       currentUrl.value = response;
       currentSong.value = song;
@@ -394,24 +411,24 @@ export function usePlayer() {
   };
 
   const fetchLyrics = async (song: any) => {
-    lyrics.value = [{ time: 0, text: t('app.loadingLyrics') }];
+    lyrics.value = [{ time: 0, text: t('app.loadingLyrics'), tText: '' }];
     currentLyricIndex.value = -1;
     try {
       const resp = await axios.get(`${backendUrl}/api/lyric`, {
         params: { songmid: song.songmid, source: song.source, hash: song.hash }
       });
       if (resp.data.lyric) {
-        parseLrc(resp.data.lyric);
+        parseLrc(resp.data.lyric, resp.data.tlyric || '');
       } else {
-        lyrics.value = [{ time: 0, text: t('app.noLyrics') }];
+        lyrics.value = [{ time: 0, text: t('app.noLyrics'), tText: '' }];
       }
     } catch (error) {
       console.error('Failed to fetch lyrics:', error);
-      lyrics.value = [{ time: 0, text: t('app.fetchLyricsFailed') }];
+      lyrics.value = [{ time: 0, text: t('app.fetchLyricsFailed'), tText: '' }];
     }
   };
 
-  const parseLrc = (lrc: string) => {
+  const parseSingleLrc = (lrc: string) => {
     const lines = lrc.split('\n');
     const result: { time: number, text: string }[] = [];
     const timeExp = /\[(\d{2,}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
@@ -435,7 +452,32 @@ export function usePlayer() {
         }
       }
     }
-    lyrics.value = result.sort((a, b) => a.time - b.time);
+    return result.sort((a, b) => a.time - b.time);
+  };
+
+  const parseLrc = (lrc: string, tlyric = '') => {
+    const main = parseSingleLrc(lrc);
+    const translated = tlyric ? parseSingleLrc(tlyric) : [];
+
+    if (main.length === 0) {
+      lyrics.value = [{ time: 0, text: t('app.noLyrics'), tText: '' }];
+      return;
+    }
+
+    if (translated.length === 0) {
+      lyrics.value = main.map(line => ({ ...line, tText: '' }));
+      return;
+    }
+
+    const tMap = new Map<string, string>();
+    for (const line of translated) {
+      tMap.set(line.time.toFixed(3), line.text);
+    }
+
+    lyrics.value = main.map(line => ({
+      ...line,
+      tText: tMap.get(line.time.toFixed(3)) || '',
+    }));
   };
 
   const updateLyricIndex = (currentTime: number, lyricScrollRef: HTMLElement | null) => {

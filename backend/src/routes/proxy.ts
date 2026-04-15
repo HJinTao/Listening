@@ -25,7 +25,7 @@ router.post('/', async (req, res) => {
       validateStatus: () => true, // resolve all status codes
     });
 
-    res.status(response.status).json({
+    res.status(200).json({
       statusCode: response.status,
       statusMessage: response.statusText,
       headers: response.headers,
@@ -33,7 +33,12 @@ router.post('/', async (req, res) => {
     });
   } catch (error: any) {
     console.error('Proxy error:', error.message);
-    res.status(500).json({ error: error.message });
+    res.status(200).json({
+      statusCode: 500,
+      statusMessage: 'Internal Server Error',
+      headers: {},
+      body: { error: error.message }
+    });
   }
 });
 

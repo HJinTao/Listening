@@ -58,7 +58,7 @@ export const activeVote = ref<any>(null);
 export const modeToast = ref<string>('');
 
 // Player
-export const lxEngine = ref<LxEngine | null>(null);
+export const lxEngines = ref<LxEngine[]>([]);
 export const scriptLoaded = ref(false);
 export const playMode = ref<'list-loop' | 'single-loop' | 'random'>('list-loop');
 export const currentContext = ref<'search' | 'playlist' | 'room'>('search');
@@ -78,7 +78,7 @@ export const lastAppliedSeq = ref(0);
 export const pendingAfterLoad = ref<null | { targetTime: number; shouldPlay: boolean }>(null);
 
 // Lyrics
-export const lyrics = ref<{ time: number, text: string }[]>([]);
+export const lyrics = ref<{ time: number, text: string, tText?: string }[]>([]);
 export const currentLyricIndex = ref(-1);
 
 // Search
